@@ -13,6 +13,7 @@
 
 /* ---------------- Config & LS helpers ---------------- */
 const BASE_URL = window.BASE_URL || "http://127.0.0.1:5050";
+window.BASE_URL = window.BASE_URL || "https://data-analysis-nit-3004.onrender.com/";
 const LS_KEYS_TO_CLEAR = [
   "summary","correlation","valueCounts","pca","kmeans","assoc",
   "autoBundle","autoAI","lastAI","colTypesCache","primaryCategorical"
