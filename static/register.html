@@ -9,8 +9,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
-  <script>window.BASE_URL = window.BASE_URL || "http://127.0.0.1:5050";</script>
-  <script defer src="script.js"></script>
+  
+  <script defer src="script.js?v=4.6.2"></script>
+
 
   <style>
     body{
@@ -123,16 +124,8 @@
 
   <!-- Minimal guards if script.js isn't loaded yet -->
   <script>
-    if(!window.handleApi){
-      window.handleApi = async (p,o={})=>{
-        const init={method:(o.method||'GET').toUpperCase(),headers:{'Content-Type':'application/json'},credentials:'include'};
-        if(o.body) init.body = typeof o.body==='string'?o.body:JSON.stringify(o.body);
-        const r=await fetch((window.BASE_URL||'')+p,init);
-        let j={}; try{j=await r.json();}catch{}
-        if(!r.ok||j.status==='error') throw new Error(j.error||('HTTP '+r.status));
-        return j;
-      };
-    }
+    
+    
     function togglePwd(id,btn){
       const el=document.getElementById(id); if(!el) return;
       const open=el.type==="password"; el.type=open?"text":"password";

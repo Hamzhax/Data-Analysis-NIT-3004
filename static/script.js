@@ -11,18 +11,19 @@
    • All legacy window.* API names preserved
 ========================================================= */
 
-/* ---------- BASE_URL auto-detect ---------- */
-let BASE_URL = window.BASE_URL; // allow manual override from HTML if ever needed
+/* ---------------- Config & LS helpers ---------------- */
+
+/* -------- BASE_URL auto-detect -------- */
+let BASE_URL = window.BASE_URL;
 if (!BASE_URL) {
   const origin = window.location.origin;
-  // If we're running on Render (production), use same origin.
-  // Otherwise fall back to local dev flask.
-  BASE_URL = origin.includes("onrender.com")
-    ? origin
-    : "http://127.0.0.1:5050";
+  if (origin.includes("onrender.com")) {
+    BASE_URL = origin;
+  } else {
+    BASE_URL = "http://127.0.0.1:5050"; // local dev
+  }
 }
 window.BASE_URL = BASE_URL;
-
 
 const LS_KEYS_TO_CLEAR = [
   "summary","correlation","valueCounts","pca","kmeans","assoc",

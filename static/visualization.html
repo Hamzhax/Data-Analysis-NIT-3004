@@ -5,8 +5,8 @@
   <title>Data Dashboard – Visualize</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="styles.css" />
-  <script>window.BASE_URL = window.BASE_URL || "http://127.0.0.1:5050";</script>
-  <script defer src="script.js"></script>
+  <script defer src="script.js?v=4.6.2"></script>
+
 
   <style>
     /* --------- Layout ---------- */
@@ -384,7 +384,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     const active = await syncActiveFile?.(true);
     if(active) $("active-file-chip").textContent = `Active: ${active}`;
     loadMeta?.();
-    hydrateAll?.(); // if existed in older versions, harmless otherwise
+   // hydrateAll?.(); // if existed in older versions, harmless otherwise
   }catch(e){ console.warn(e); }
 
   /* Buttons not bound in script.js get bound here */
