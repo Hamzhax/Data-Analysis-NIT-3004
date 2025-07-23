@@ -12,8 +12,18 @@
 ========================================================= */
 
 /* ---------------- Config & LS helpers ---------------- */
-const BASE_URL = window.BASE_URL || "http://127.0.0.1:5050";
-window.BASE_URL = window.BASE_URL || "https://data-analysis-nit-3004.onrender.com/";
+/* -------- BASE_URL auto-detect -------- */
+let BASE_URL = window.BASE_URL;               // allow manual override
+if (!BASE_URL) {
+  const origin = window.location.origin;
+  if (origin.includes("onrender.com")) {
+    BASE_URL = origin;                        // production
+  } else {
+    BASE_URL = "http://127.0.0.1:5050";       // local dev
+  }
+}
+window.BASE_URL = BASE_URL;
+
 const LS_KEYS_TO_CLEAR = [
   "summary","correlation","valueCounts","pca","kmeans","assoc",
   "autoBundle","autoAI","lastAI","colTypesCache","primaryCategorical"
