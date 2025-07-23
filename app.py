@@ -40,7 +40,7 @@ import numpy as np
 # Optional deps
 try: import requests
 except Exception: requests = None
-
+import time, copy
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 
@@ -112,6 +112,49 @@ app.config.update(
     SESSION_COOKIE_SECURE        = SESSION_COOKIE_SECURE,
     PERMANENT_SESSION_LIFETIME   = timedelta(seconds=PERMANENT_LIFETIME_SEC),
 )
+# --- simple in‑memory cache (resets on dyno restart) ---
+_BUNDLE_CACHE = {}
+_CACHE_TTL_SEC = 600  # 10 min
+
+def _get_cached_bundle(filename):
+    item = _BUNDLE_CACHE.get(filename)
+    if not item:
+        return None
+    bundle, ts = item
+    if time.time() - ts > _CACHE_TTL_SEC:
+        _BUNDLE_CACHE.pop(filename, None)
+        return None
+    return bundle
+
+def _cache_bundle(filename, bundle):
+    _BUNDLE_CACHE[filename] = (bundle, time.time())
+
+def _top_corr_pairs(corr_dict, limit=50):
+    pairs = []
+    cols = list(corr_dict.keys())
+    for i, a in enumerate(cols):
+        for b in cols[i+1:]:
+            v = corr_dict[a].get(b)
+            if isinstance(v, (int, float)):
+                pairs.append((a, b, abs(v), v))
+    pairs.sort(key=lambda x: x[2], reverse=True)
+    return [{"a": a, "b": b, "abs": av, "r": r} for a, b, av, r in pairs[:limit]]
+
+def slim_bundle(bundle):
+    """Return a smaller version that’s fast to ship to the browser."""
+    out = copy.deepcopy(bundle)
+
+    # Correlation
+    if "correlation_matrix" in out:
+        out["top_correlations"] = _top_corr_pairs(out["correlation_matrix"], 50)
+        # drop full matrix if size is an issue (front-end can request /api/correlation/export)
+        # del out["correlation_matrix"]
+
+    # Association rules
+    if "assoc_rules" in out and len(out["assoc_rules"]) > 100:
+        out["assoc_rules"] = out["assoc_rules"][:100]
+
+    return out
 
 # Always set permanent (rolling) sessions
 @app.before_request
@@ -577,8 +620,7 @@ def clean():
     df.to_csv(path, index=False)
     invalidate_cache()
     update_dataset_metadata(filename)
-    if session.get("last_auto_bundle_file") == filename:
-        session.pop("last_auto_bundle", None)
+    if _BUNDLE_CACHE.pop(filename, None)
     return ok(message="cleaned")
 
 @app.get("/api/coltypes")
@@ -882,19 +924,28 @@ chart_priorities (ordered array).
 @app.post("/api/auto_explore")
 def auto_explore():
     ok_login, resp = require_login()
-    if not ok_login: return resp
+    if not ok_login:
+        return resp
+
     fn = session.get("filename")
-    if not fn: return fail("No active dataset.")
+    if not fn:
+        return fail("No active dataset.")
+
     try:
-        if session.get("last_auto_bundle_file") == fn and session.get("last_auto_bundle"):
-            bundle = session["last_auto_bundle"]
-        else:
+        # 1) get or build
+        bundle = _get_cached_bundle(fn)
+        if bundle is None:
             bundle = build_auto_bundle(fn)
-            session["last_auto_bundle"] = bundle
-            session["last_auto_bundle_file"] = fn
+            _cache_bundle(fn, bundle)
+
+        # 2) generate AI (can use full bundle)
         ai = ai_narrative_from_bundle(bundle)
-        return ok(bundle=bundle, ai=ai)
+
+        # 3) return slimmed version to client
+        return ok(bundle=slim_bundle(bundle), ai=ai)
+
     except Exception as e:
+        app.logger.exception("auto_explore failed")
         return fail(f"Auto explore failed: {e}", 500)
 
 # ---------- CORRELATION EXPORT ----------
