@@ -396,6 +396,9 @@ def login():
         return ok(user=user["username"], role=user["role"])
     except Exception as e:
         return fail(str(e), 500)
+@app.get("/healthz")
+def healthz():
+    return "ok", 200
 
 @app.post("/api/logout")
 def logout():
@@ -620,8 +623,8 @@ def clean():
     df.to_csv(path, index=False)
     invalidate_cache()
     update_dataset_metadata(filename)
-    if _BUNDLE_CACHE.pop(filename, None)
-    return ok(message="cleaned")
+    if _BUNDLE_CACHE.pop(filename, None):
+        return ok(message="cleaned")
 
 @app.get("/api/coltypes")
 def coltypes():
