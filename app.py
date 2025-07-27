@@ -615,17 +615,30 @@ def clean():
     path = os.path.join(UPLOAD_FOLDER, filename)
     if not os.path.exists(path): return fail("Not found.")
     df = read_csv_resilient(path)
-    if d.get("remove_duplicates"): df = df.drop_duplicates()
-    if d.get("drop_na"): df = df.dropna()
+    orig_shape = df.shape
+    changed = False
+    if d.get("remove_duplicates"):
+        df2 = df.drop_duplicates()
+        if not df2.equals(df): changed = True
+        df = df2
+    if d.get("drop_na"):
+        df2 = df.dropna()
+        if not df2.equals(df): changed = True
+        df = df2
     fill_value = d.get("fill_value")
     if fill_value not in [None, ""]:
-        df = df.fillna(fill_value)
-    df.to_csv(path, index=False)
-    invalidate_cache()
-    update_dataset_metadata(filename)
-    if _BUNDLE_CACHE.pop(filename, None):
+        df2 = df.fillna(fill_value)
+        if not df2.equals(df): changed = True
+        df = df2
+    if changed:
+        df.to_csv(path, index=False)
+        invalidate_cache()
+        update_dataset_metadata(filename)
+        if _BUNDLE_CACHE.pop(filename, None):
+            pass
         return ok(message="cleaned")
-
+    else:
+        return ok(message="already_clean")
 @app.get("/api/coltypes")
 def coltypes():
     ok_login, resp = require_login()

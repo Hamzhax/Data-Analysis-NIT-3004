@@ -41,14 +41,14 @@ function toast(msg,type="info",timeout=3000){
   if(!wrap){
     wrap=document.createElement("div");
     wrap.id="toast-wrap";
-    Object.assign(wrap.style,{
-      position:"fixed",right:"1rem",bottom:"1rem",display:"flex",
-      flexDirection:"column",gap:".55rem",zIndex:9999,maxWidth:"320px"
-    });
+    wrap.style.cssText="position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:.5rem;align-items:flex-end;";
     document.body.appendChild(wrap);
   }
+  const icons = {
+    error: "⛔️", success: "✅", warn: "⚠️", info: "ℹ️"
+  };
   const card=document.createElement("div");
-  card.textContent=msg;
+  card.innerHTML = `<span style="margin-right:.5em">${icons[type]||""}</span>${msg}`;
   card.style.cssText=`
     font:500 .7rem/1.35 Inter,system-ui,sans-serif;
     background:${type==="error"?"#3b1217":type==="success"?"#123b2a":type==="warn"?"#3b2f12":"#162235"};
@@ -59,10 +59,7 @@ function toast(msg,type="info",timeout=3000){
     transition:opacity .35s,transform .35s;`;
   wrap.appendChild(card);
   requestAnimationFrame(()=>{card.style.opacity=1;card.style.transform="translateY(0)";});
-  setTimeout(()=>{
-    card.style.opacity=0;card.style.transform="translateY(4px)";
-    setTimeout(()=>card.remove(),380);
-  },timeout);
+  setTimeout(()=>{card.style.opacity=0;card.style.transform="translateY(6px)";setTimeout(()=>wrap.removeChild(card),350);},timeout);
 }
 
 /* ---------------- Fetch wrapper ---------------- */
@@ -162,7 +159,11 @@ async function fetchFromInternet(url){
     resetAnalysisCacheOnDatasetChange(data.filename);
     toast("Fetched remote CSV","success"); st&&(st.textContent="Fetched ✓");
     await previewDataset(); inferColumnTypes();
-  }catch(e){ st&&(st.textContent="Fetch failed"); toast("Fetch error: "+e.message,"error"); }
+  }catch(e){
+    st&&(st.textContent="Fetch failed");
+    // Show backend error if available
+    toast("Fetch error: "+(e.message||e.error||"Unknown error"),"error");
+  }
 }
 async function smartSearch(){
   const q=$("search-input"), st=$("search-status"), resBox=$("search-results");
@@ -190,9 +191,15 @@ async function applyCleaning(){
   };
   try{
     $("clean-status")&&( $("clean-status").textContent="Cleaning...");
-    await handleApi("/api/clean",{method:"POST",body});
-    $("clean-status")&&( $("clean-status").textContent="Cleaned ✓");
-    toast("Cleaning applied","success"); await previewDataset(); inferColumnTypes();
+    const res = await handleApi("/api/clean",{method:"POST",body});
+    if(res.message === "already_clean"){
+      $("clean-status")&&( $("clean-status").textContent="Already clean");
+      toast("Dataset is already clean","info");
+    } else {
+      $("clean-status")&&( $("clean-status").textContent="Cleaned ✓");
+      toast("Cleaning applied","success");
+    }
+    await previewDataset(); inferColumnTypes();
   }catch(e){
     $("clean-status")&&( $("clean-status").textContent="Failed");
     toast("Clean error: "+e.message,"error");
