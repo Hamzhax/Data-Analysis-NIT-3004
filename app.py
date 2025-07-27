@@ -399,7 +399,25 @@ def login():
 @app.get("/healthz")
 def healthz():
     return "ok", 200
+import secrets
 
+@app.post("/api/forgot")
+def forgot():
+    d = request.get_json(force=True) or {}
+    username = (d.get("username") or "").strip()
+    if not username:
+        return fail("Username required.")
+    users = load_users()
+    for u in users:
+        if u["username"].lower() == username.lower():
+            # Generate a temp password
+            temp_pw = secrets.token_urlsafe(8)
+            u["password_hash"] = generate_password_hash(temp_pw)
+            save_users(users)
+            # In production, send email here. For demo, just print.
+            print(f"[FORGOT PASSWORD] User: {username}, Temp Password: {temp_pw}")
+            return ok(message="Temporary password set. Please check your email (demo: check server logs).")
+    return fail("User not found.", 404)
 @app.post("/api/logout")
 def logout():
     session.clear()
@@ -1198,8 +1216,15 @@ def health():
 # ---------- STATIC ----------
 @app.get("/")
 def root_index():
-    # Serve dashboard by default (put dashboard.html under /static)
-    return send_from_directory(app.static_folder, "dashboard.html")
+    # Serve login by default
+    return send_from_directory(app.static_folder, "login.html")
+from flask import redirect, url_for
+
+@app.get("/")
+def root_index():
+    if "user" in session:
+        return redirect("/dashboard.html")
+    return send_from_directory(app.static_folder, "login.html")
 
 # ---------- CORS/OPTIONS ----------
 @app.after_request

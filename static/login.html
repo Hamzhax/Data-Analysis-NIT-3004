@@ -101,6 +101,11 @@
           </div>
         </div>
 
+        <div class="form-row" style="display:flex;align-items:center;gap:.5rem;">
+          <input type="checkbox" id="remember-me" style="width:auto;">
+          <label for="remember-me" style="margin:0;">Remember me</label>
+        </div>
+
         <button class="btn-auth" style="margin-top:.6rem;">Login</button>
         <div id="login-status" class="text-small text-danger"></div>
       </form>
@@ -122,15 +127,32 @@
       btn.textContent=open?"🙈":"👁";
     }
     async function loginSubmit(){
-      const u=document.getElementById("login-username").value.trim();
-      const p=document.getElementById("login-password").value;
-      const st=document.getElementById("login-status");
-      st.textContent="Authenticating...";
-      try{
-        await handleApi("/api/login",{method:"POST",body:{username:u,password:p}});
-        st.textContent="Success. Redirecting...";
-        setTimeout(()=>location.href="dashboard.html",450);
-      }catch(e){ st.textContent=e.message; }
+  const u=document.getElementById("login-username").value.trim();
+  const p=document.getElementById("login-password").value;
+  const st=document.getElementById("login-status");
+  const remember=document.getElementById("remember-me").checked;
+  st.textContent="Authenticating...";
+  try{
+    await handleApi("/api/login",{method:"POST",body:{username:u,password:p}});
+    if(remember){
+      localStorage.setItem("rememberedUser",u);
+      localStorage.setItem("rememberedPass",p);
+    }else{
+      localStorage.removeItem("rememberedUser");
+      localStorage.removeItem("rememberedPass");
+    }
+    st.textContent="Success. Redirecting...";
+    setTimeout(()=>location.href="dashboard.html",450);
+  }catch(e){ st.textContent=e.message; }
+}
+
+// Autofill if remembered
+document.addEventListener("DOMContentLoaded",()=>{
+  const u=localStorage.getItem("rememberedUser");
+  const p=localStorage.getItem("rememberedPass");
+  if(u) document.getElementById("login-username").value=u;
+  if(p) document.getElementById("login-password").value=p;
+});
     }
   </script>
 </body>

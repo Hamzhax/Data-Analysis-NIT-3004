@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-page="forgot">
+<head>
+  <meta charset="UTF-8" />
+  <title>Forgot Password · Data Dashboard</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="styles.css" />
+  <script defer src="script.js?v=4.6.2"></script>
+</head>
+<body>
+  <header class="navbar">
+    <div class="nav-left">
+      <div class="nav-brand">📊 Data Dashboard</div>
+    </div>
+  </header>
+  <div class="auth-wrapper">
+    <div class="auth-card fade-slide-up">
+      <h1 class="auth-title gradient-text">Forgot Password</h1>
+      <form onsubmit="event.preventDefault();forgotSubmit();" class="form">
+        <div class="form-row">
+          <label for="forgot-username">Username</label>
+          <input id="forgot-username" class="input" required placeholder="Your username">
+        </div>
+        <button class="btn-auth" style="margin-top:.6rem;">Reset Password</button>
+        <div id="forgot-status" class="text-small text-danger"></div>
+      </form>
+      <p class="text-small" style="margin-top:1.3rem;text-align:center;">
+        <a href="login.html" class="inline-link">Back to Login</a>
+      </p>
+    </div>
+  </div>
+  <footer>Data Mining Dashboard • v4.6 • NIT 3004 H2B1</footer>
+  <script>
+    async function forgotSubmit(){
+      const username=document.getElementById("forgot-username").value.trim();
+      const st=document.getElementById("forgot-status");
+      st.textContent="Processing...";
+      try{
+        await handleApi("/api/forgot",{method:"POST",body:{username}});
+        st.textContent="A reset link or temp password has been sent (demo).";
+      }catch(e){ st.textContent=e.message; }
+    }
+  </script>
+</body>
+</html>
