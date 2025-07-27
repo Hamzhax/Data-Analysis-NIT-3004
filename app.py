@@ -1214,18 +1214,13 @@ def health():
     )
 
 # ---------- STATIC ----------
-@app.get("/")
-def index_root():
-    if "user" in session:
-        return redirect("/dashboard.html")
-    return send_from_directory(app.static_folder, "login.html")
-from flask import redirect, url_for
 
 @app.get("/")
 def root_index():
     if "user" in session:
         return redirect("/dashboard.html")
     return send_from_directory(app.static_folder, "login.html")
+
 @app.route("/<path:anything>", methods=["OPTIONS"])
 def any_options(anything):
     return ok()
