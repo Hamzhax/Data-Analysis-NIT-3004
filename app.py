@@ -29,7 +29,7 @@ from datetime import timedelta
 
 from flask import (
     Flask, request, jsonify, session, send_from_directory,
-    send_file, Blueprint
+    send_file, Blueprint, redirect, url_for
 )
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -1215,8 +1215,9 @@ def health():
 
 # ---------- STATIC ----------
 @app.get("/")
-def root_index():
-    # Serve login by default
+def index_root():
+    if "user" in session:
+        return redirect("/dashboard.html")
     return send_from_directory(app.static_folder, "login.html")
 from flask import redirect, url_for
 
@@ -1225,18 +1226,6 @@ def root_index():
     if "user" in session:
         return redirect("/dashboard.html")
     return send_from_directory(app.static_folder, "login.html")
-
-# ---------- CORS/OPTIONS ----------
-@app.after_request
-def add_cors(resp):
-    origin = request.headers.get("Origin")
-    if origin and origin in ALLOWED_ORIGINS:
-        resp.headers["Access-Control-Allow-Origin"] = origin
-    resp.headers["Access-Control-Allow-Credentials"] = "true"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
-    resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,OPTIONS"
-    return resp
-
 @app.route("/<path:anything>", methods=["OPTIONS"])
 def any_options(anything):
     return ok()
