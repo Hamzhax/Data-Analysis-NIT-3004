@@ -697,338 +697,163 @@ function copyToClipboard(txt){
 
 /* ---------- PCA ---------- */
 function renderPCA(){
-  const pca=lsGet("pca")||lsGet("autoBundle")?.pca;
-  const box=$("pca-box")||$("pca-container"); if(!box) return;
-  const comps=pca?.components_2d || pca?.components;
+  const pca = lsGet("pca") || lsGet("autoBundle")?.pca;
+  const km = lsGet("kmeans") || lsGet("autoBundle")?.kmeans;
+  const box = $("pca-box") || $("pca-container"); if(!box) return;
+  const comps = pca?.components_2d || pca?.components;
   if(!comps){ box.innerHTML="<p class='text-small text-dim'>No PCA data.</p>"; return; }
+
+  // Try to color by cluster if available
+  const labels = km?.labels_preview || [];
+  const hasClusters = labels.length === comps.length;
+  const colors = ["#02b2ff","#b136ff","#ffb86c","#10b981","#ef4444","#f59e42","#7a4bff","#ff7a7a"];
+  const datasets = hasClusters
+    ? [...new Set(labels)].map((cl,idx)=>({
+        label: "Cluster "+cl,
+        data: comps.map((p,i)=>labels[i]===cl?{x:p[0],y:p[1]}:null).filter(Boolean),
+        backgroundColor: colors[cl%colors.length]+"cc",
+        pointRadius: 4,
+        pointHoverRadius: 7,
+      }))
+    : [{
+        label:"PCA",
+        data: comps.map(p=>({x:p[0],y:p[1]})),
+        backgroundColor:"#02b2ffcc",
+        pointRadius: 4,
+        pointHoverRadius: 7,
+      }];
+
   box.innerHTML="<canvas id='pca-canvas' style='width:100%;height:100%'></canvas>";
-  const ctx=$("pca-canvas").getContext("2d");
+  const ctx = $("pca-canvas").getContext("2d");
   if(VizCharts.pca) VizCharts.pca.destroy();
-  const pts=comps.map(p=>({x:p[0],y:p[1]}));
-  VizCharts.pca=new Chart(ctx,{type:"scatter",
-    data:{datasets:[{label:"PCA",data:pts}]},
-    options:{responsive:true,plugins:{legend:{display:false}},
-             scales:{x:{ticks:{color:getCss('--text-dim')}},y:{ticks:{color:getCss('--text-dim')}}}}
+
+  const exp = pca?.explained || pca?.explained_variance || [];
+  VizCharts.pca = new Chart(ctx, {
+    type: "scatter",
+    data: { datasets },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: true },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const d = ctx.raw;
+              let txt = `(${d.x.toFixed(2)}, ${d.y.toFixed(2)})`;
+              if(hasClusters && ctx.dataset.label) txt += ` | ${ctx.dataset.label}`;
+              return txt;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          title: {
+            display: true,
+            text: `PC1${exp[0] ? ` (${(exp[0]*100).toFixed(1)}%)` : ""}`,
+            color: "#b8c9d6"
+          },
+          ticks: { color: getCss('--text-dim') }
+        },
+        y: {
+          title: {
+            display: true,
+            text: `PC2${exp[1] ? ` (${(exp[1]*100).toFixed(1)}%)` : ""}`,
+            color: "#b8c9d6"
+          },
+          ticks: { color: getCss('--text-dim') }
+        }
+      }
+    }
   });
   syncExportButtons();
 }
 
 /* ---------- KMeans ---------- */
 function renderKMeans(){
-  const km=lsGet("kmeans")||lsGet("autoBundle")?.kmeans;
-  const box=$("kmeans-box")||$("kmeans-container"); if(!box) return;
-  const labels=km?.labels_preview || km?.labels;
+  const km = lsGet("kmeans") || lsGet("autoBundle")?.kmeans;
+  const pca = lsGet("pca") || lsGet("autoBundle")?.pca;
+  const box = $("kmeans-box") || $("kmeans-container"); if(!box) return;
+  const labels = km?.labels_preview || km?.labels;
   if(!labels){ box.innerHTML="<p class='text-small text-dim'>No clustering data.</p>"; return; }
-  const pts=labels.map((lab,i)=>({x:i,y:lab}));
+
+  // Use PCA for 2D plotting if available
+  const comps = pca?.components_2d;
+  if(!comps || comps.length !== labels.length){
+    // fallback: 1D cluster plot
+    const pts = labels.map((lab,i)=>({x:i,y:lab}));
+    box.innerHTML="<canvas id='kmeans-canvas' style='width:100%;height:100%'></canvas>";
+    const ctx = $("kmeans-canvas").getContext("2d");
+    if(VizCharts.kmeans) VizCharts.kmeans.destroy();
+    VizCharts.kmeans = new Chart(ctx, {
+      type: "scatter",
+      data: { datasets: [{ label: "Clusters", data: pts, backgroundColor: "#b136ffcc" }] },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: { x: { ticks: { color: getCss('--text-dim') } }, y: { ticks: { color: getCss('--text-dim') } } }
+      }
+    });
+    syncExportButtons();
+    return;
+  }
+
+  // 2D cluster plot in PCA space
+  const colors = ["#02b2ff","#b136ff","#ffb86c","#10b981","#ef4444","#f59e42","#7a4bff","#ff7a7a"];
+  const clusters = [...new Set(labels)];
+  const datasets = clusters.map((cl,idx)=>({
+    label: "Cluster "+cl,
+    data: comps.map((p,i)=>labels[i]===cl?{x:p[0],y:p[1]}:null).filter(Boolean),
+    backgroundColor: colors[cl%colors.length]+"cc",
+    pointRadius: 4,
+    pointHoverRadius: 7,
+  }));
+
+  // Cluster centers (if available)
+  let centers = [];
+  if(km?.centers && km.centers[0].length >= 2){
+    centers = km.centers.map((c,i)=>({
+      x: c[0], y: c[1], cluster: i
+    }));
+    datasets.push({
+      label: "Centers",
+      data: centers,
+      backgroundColor: "#fff",
+      borderColor: "#000",
+      pointRadius: 8,
+      pointStyle: "rectRot",
+      showLine: false
+    });
+  }
+
   box.innerHTML="<canvas id='kmeans-canvas' style='width:100%;height:100%'></canvas>";
-  const ctx=$("kmeans-canvas").getContext("2d");
+  const ctx = $("kmeans-canvas").getContext("2d");
   if(VizCharts.kmeans) VizCharts.kmeans.destroy();
-  VizCharts.kmeans=new Chart(ctx,{type:"scatter",
-    data:{datasets:[{label:"Clusters",data:pts}]},
-    options:{responsive:true,plugins:{legend:{display:false}},
-             scales:{x:{ticks:{color:getCss('--text-dim')}},y:{ticks:{color:getCss('--text-dim')}}}}
+
+  VizCharts.kmeans = new Chart(ctx, {
+    type: "scatter",
+    data: { datasets },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: true },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const d = ctx.raw;
+              let txt = `(${d.x.toFixed(2)}, ${d.y.toFixed(2)})`;
+              if(ctx.dataset.label && ctx.dataset.label.startsWith("Cluster")) txt += ` | ${ctx.dataset.label}`;
+              if(ctx.dataset.label === "Centers") txt += " (center)";
+              return txt;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { title: { display: true, text: "PC1", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } },
+        y: { title: { display: true, text: "PC2", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } }
+      }
+    }
   });
   syncExportButtons();
 }
-
-/* ---------- Association Rules ---------- */
-function renderAssoc(){
-  const assoc=lsGet("assoc")||lsGet("autoBundle")?.assoc_rules;
-  const box=$("assoc-box")||$("assoc-container"); if(!box) return;
-  if(!assoc||!assoc.length){ box.innerHTML="<p class='text-small text-dim'>No rules.</p>"; return; }
-  let h=`<table class='data-table'><thead><tr>
-  <th>Antecedents</th><th>Consequents</th><th>Support</th><th>Confidence</th><th>Lift</th>
-  </tr></thead><tbody>`;
-  assoc.slice(0,100).forEach(r=>{
-    h+=`<tr>
-      <td>${Array.isArray(r.antecedents)?r.antecedents.join(", "):r.antecedents}</td>
-      <td>${Array.isArray(r.consequents)?r.consequents.join(", "):r.consequents}</td>
-      <td>${(+r.support||0).toFixed(3)}</td>
-      <td>${(+r.confidence||0).toFixed(3)}</td>
-      <td>${(+r.lift||0).toFixed(3)}</td>
-    </tr>`;
-  });
-  h+="</tbody></table>";
-  box.innerHTML=h;
-}
-
-/* ---------- Summary ---------- */
-function renderSummary(){
-  const sum=lsGet("summary")||lsGet("autoBundle")?.summary;
-  const box=$("summary-box")||$("summary-container"); if(!box) return;
-  if(!sum){ box.innerHTML="<p class='text-small text-dim'>No summary data.</p>"; return; }
-  const cols=Object.keys(sum); const stats=new Set(); cols.forEach(c=>Object.keys(sum[c]).forEach(k=>stats.add(k)));
-  let h="<table class='data-table'><thead><tr><th>Metric</th>"+cols.map(c=>`<th>${c}</th>`).join("")+"</tr></thead><tbody>";
-  [...stats].forEach(st=>{
-    h+=`<tr><th style="background:#1a2c3a">${st}</th>`;
-    cols.forEach(c=>{
-      let v=sum[c][st];
-      if(v==null) v=""; else if(typeof v==="number") v=(Math.abs(v)>1e6||Math.abs(v)<1e-4)?v:v.toPrecision(6);
-      h+=`<td>${v}</td>`;
-    });
-    h+="</tr>";
-  });
-  h+="</tbody></table>"; box.innerHTML=h;
-}
-
-/* ---------- AI Narrative render ---------- */
-function renderAINarrative(){
-  const box = $("ai-narrative-box") || $("ai-latest");
-  if(!box) return;
-
-  const raw = lsGet("autoAI") || lsGet("lastAI");
-  if(!raw){
-    box.innerHTML = "<p class='text-small text-dim'>No AI narrative yet.</p>";
-    return;
-  }
-
-  const ai = cleanAIBlock(raw);
-
-  const list = (title, arr) =>
-    (arr && arr.length)
-      ? `<strong style="font-size:.62rem;">${title}</strong>
-         <ul style="font-size:.6rem;margin:.35rem 0 .6rem 1rem;">${arr.map(x=>`<li>${x}</li>`).join("")}</ul>`
-      : "";
-
-  let html = "";
-  if(ai.summary) html += `<p style="font-size:.66rem;line-height:1.45">${ai.summary}</p>`;
-  html += list("Key Points", ai.key_points);
-  html += list("Anomalies",  ai.anomalies);
-  if(ai.recommendation){
-    html += `<p style="font-size:.6rem;"><strong>Recommendation:</strong> ${ai.recommendation}</p>`;
-  }
-  html += list("Next Steps", ai.next_steps);
-
-  box.innerHTML = html || "<em>AI narrative present but unstructured.</em>";
-}
-
-/* ---------- Overview ---------- */
-function renderOverview(){
-  const b=lsGet("autoBundle");
-  const oc=$("overview-meta")||$("overview-container"); if(!oc) return;
-  if(!b){
-    const fn=localStorage.getItem("filename")||"(none)";
-    oc.innerHTML=`<p class='text-small text-dim'>No Auto Explore yet. Active file: <strong>${fn}</strong>.</p>`;
-    return;
-  }
-  const base=b.profile?.basic||{};
-  const rec=(b.recommended_charts||[]).map(c=>c.type||c).join(", ");
-  oc.innerHTML=`
-    <div class="inline wrap" style="gap:.4rem;margin-bottom:.4rem;">
-      <span class="badge-chip">${b.filename}</span>
-      <span class="badge-chip">${base.rows} rows</span>
-      <span class="badge-chip">${base.columns} cols</span>
-      <span class="badge-chip">${base.numeric_cols} numeric</span>
-      <span class="badge-chip">${base.categorical_cols} categorical</span>
-    </div>
-    <p style="font-size:.63rem;margin:.4rem 0;"><strong>Recommended charts:</strong> ${rec||"—"}</p>`;
-}
-
-/* ---------- Column type ribbon ---------- */
-function inferColumnTypes(){
-  const bundle=lsGet("autoBundle"), summary=bundle?.summary||lsGet("summary");
-  let cols=[]; if(summary) cols=Object.keys(summary);
-  const types={}, rowCount=bundle?.profile?.basic?.rows||0;
-  const numR=/(_amt|_num|count|total|sum|avg|mean|price|age|score|rate|pct|perc|lat|lon|long|prob|rank)$/i;
-  const dateR=/(date|day|time|timestamp|dt)$/i;
-  const idR=/(id|uuid|guid|code|ref)$/i;
-  const boolR=/^(is_|has_|flag_|active|enabled|valid)/i;
-  cols.forEach(c=>{
-    const info=summary?.[c]||{}, u=info.unique??info.Unique??null;
-    let k="TEXT";
-    if(info.mean!==undefined||info.std!==undefined||info.max!==undefined) k="NUM";
-    if(u!==null){
-      if(u<=2) k="BOOL";
-      else if(u<=Math.min(20,Math.max(10,rowCount*0.05)) && k!=="NUM") k="CAT";
-    }
-    if(dateR.test(c)) k="DATE";
-    if(idR.test(c))   k="ID";
-    if(boolR.test(c)) k="BOOL";
-    if(numR.test(c)&&k!=="DATE") k="NUM";
-    types[c]=k;
-  });
-  try{localStorage.setItem("colTypesCache",JSON.stringify(types));}catch{}
-  renderColumnTypeRibbon(types);
-}
-function renderColumnTypeRibbon(types){
-  const wrap=$("viz-columns")||$("col-type-ribbon"); if(!wrap) return;
-  wrap.innerHTML="";
-  if(!types||!Object.keys(types).length){
-    wrap.innerHTML='<span class="text-small text-dim" style="padding:.25rem 0;">No columns detected</span>';
-    return;
-  }
-  Object.entries(types).forEach(([col,kind])=>{
-    const el=document.createElement("code");
-    el.className="chip-col";
-    el.dataset.kind=kind; el.dataset.col=col;
-    el.innerHTML=`${col}<span class="chip-kind">${kind}</span>`;
-    el.addEventListener("click",()=>handleColumnTypeClick(col,kind));
-    wrap.appendChild(el);
-  });
-}
-function handleColumnTypeClick(col,kind){
-  if(["CAT","BOOL","ID"].includes(kind)){
-    toast(`Primary categorical: ${col}`,"info");
-    localStorage.setItem("primaryCategorical",col);
-    const b=lsGet("autoBundle");
-    if(b?.categorical?.[col]){
-      const counts=b.categorical[col];
-      lsSet("valueCounts",{labels:counts.map(x=>x.value),values:counts.map(x=>x.count),title:`Top ${col}`});
-      if(window.currentVizTab==="value_counts"||window.currentVizTab==="overview") renderValueCounts();
-    }
-  }else toast(`"${col}" is ${kind}. Use numeric analyses.`, "warn");
-}
-
-/* ---------- Meta banner ---------- */
-async function loadMeta(){
-  const box=$("viz-dataset-meta")||$("dataset-meta");
-  const chip=$("active-file-chip");
-  try{
-    const js=await handleApi("/api/files");
-    const active=js.active||localStorage.getItem("filename");
-    if(active){
-      chip&&(chip.textContent=`Active: ${active}`);
-      const f=(js.files||[]).find(x=>x.filename===active)||{};
-      box && (box.innerHTML=`<strong>${active}</strong><br>Rows: ${f.rows??"?"} | Cols: ${f.columns??"?"} | Size: ${f.size_bytes?(f.size_bytes/1024).toFixed(1)+" KB":"?"}`);
-      const b=lsGet("autoBundle")||{};
-      b.filename=active;
-      b.profile=b.profile||{}; b.profile.basic=b.profile.basic||{};
-      if(f.rows) b.profile.basic.rows=f.rows;
-      if(f.columns) b.profile.basic.columns=f.columns;
-      lsSet("autoBundle",b);
-    }else{ box&&(box.textContent="No active dataset."); }
-  }catch(e){ box&&(box.textContent="Metadata error: "+e.message); }
-}
-
-/* ---------------- Page inits ---------------- */
-function initVisualizationPage(){
-  loadMeta();
-  renderOverview();
-  const vc=lsGet("valueCounts"); if(vc) renderValueCounts(vc.mode);
-  renderAINarrative();
-  const cached=localStorage.getItem("colTypesCache");
-  if(cached){ try{renderColumnTypeRibbon(JSON.parse(cached));}catch{inferColumnTypes();} }
-  else inferColumnTypes();
-  syncExportButtons();
-}
-function initDashboardPage(){ previewDataset(); loadMeta(); }
-function initAdminPage(){ adminLoadUsers(); previewDataset(); }
-function initAnalysisPage(){ previewDataset(); loadMeta(); }
-
-/* ---------------- DOM Ready ---------------- */
-document.addEventListener("DOMContentLoaded", async ()=>{
-  await ensureAuthForProtectedPages();
-  await syncActiveFile(true);
-
-  const page=document.body.getAttribute("data-page");
-  window.currentVizTab="overview";
-
-  if(page==="visualization")      initVisualizationPage();
-  else if(page==="dashboard")     initDashboardPage();
-  else if(page==="admin")         initAdminPage();
-  else if(page==="analysis")      initAnalysisPage();
-
-  // Common listeners
-  $("smart-search-btn")?.addEventListener("click",smartSearch);
-  $("fetch-btn")?.addEventListener("click",()=>{ const u=$("remote-url")?.value?.trim(); if(u) fetchFromInternet(u); });
-  $("upload-btn")?.addEventListener("click",uploadDataset);
-  $("clean-btn")?.addEventListener("click",applyCleaning);
-  $("analyze-btn")?.addEventListener("click",runAnalysis);
-  $("ai-generate-btn")?.addEventListener("click",generateAISummary);
-  $("qi-run")?.addEventListener("click",generateAISummary);
-  $("qi-rerun")?.addEventListener("click",generateAISummary);
-  $("auto-explore-btn")?.addEventListener("click",autoExplore);
-  $("viz-auto-explore")?.addEventListener("click",autoExplore);
-  $("md-report-btn")?.addEventListener("click",downloadMarkdownReport);
-  $("pdf-report-btn")?.addEventListener("click",downloadPdfReport);
-  $("btn-clear-cache")?.addEventListener("click",clearAnalysis);
-  $("viz-clear-cache")?.addEventListener("click",clearAnalysis);
-
-  document.querySelectorAll("#logout-link,.logout-link,a[href='#logout']").forEach(el=>{
-    el.addEventListener("click",e=>{e.preventDefault();logout();});
-  });
-
-  $("download-corr-csv")?.addEventListener("click",downloadCorrelationCSV);
-  $("download-corr-png")?.addEventListener("click",downloadCorrelationPNG);
-  $("btn-corr-export-csv-2")?.addEventListener("click",downloadCorrelationCSV);
-  $("btn-corr-export-png-2")?.addEventListener("click",downloadCorrelationPNG);
-  $("corr-scale")?.addEventListener("change",()=>{ if(window.currentVizTab==="correlation") renderCorrTable(); });
-
-  // VC mode toggle
-  document.querySelectorAll("[data-vc-mode]")?.forEach(b=>{
-    b.addEventListener("click",()=>renderValueCounts(b.dataset.vcMode));
-  });
-
-  // Refresh meta
-  $("btn-refresh-meta")?.addEventListener("click",loadMeta);
-  $("viz-refresh-meta-2")?.addEventListener("click",loadMeta);
-
-  // Tabs
-  const tabsRoot=$("viz-tabs");
-  if(tabsRoot){
-    tabsRoot.addEventListener("click",e=>{
-      const btn=e.target.closest("button[data-tab]"); if(!btn) return;
-      const tab=btn.dataset.tab; window.currentVizTab=tab;
-      tabsRoot.querySelectorAll("button").forEach(b=>{
-        const on=b===btn; b.classList.toggle("active",on); b.setAttribute("aria-selected",on?"true":"false");
-      });
-      const secs={overview:"sec-overview",value_counts:"sec-value_counts",correlation:"sec-correlation",
-                  pca:"sec-pca",kmeans:"sec-kmeans",assoc:"sec-assoc",summary:"sec-summary",ai:"sec-ai"};
-      Object.entries(secs).forEach(([k,id])=>$(id)?.classList.toggle("active",k===tab));
-
-      if(tab==="value_counts") renderValueCounts();
-      if(tab==="correlation")  ensureCorrelation();
-      if(tab==="pca")          renderPCA();
-      if(tab==="kmeans")       renderKMeans();
-      if(tab==="assoc")        renderAssoc();
-      if(tab==="summary")      renderSummary();
-      if(tab==="ai")           renderAINarrative();
-      if(tab==="overview")     renderOverview();
-    });
-  }
-
-  // Resize -> redraw corr
-  let t=null;
-  window.addEventListener("resize",()=>{
-    if(window.currentVizTab==="correlation"){
-      clearTimeout(t); t=setTimeout(renderCorrTable,220);
-    }
-  });
-
-  // Storage sync
-  window.addEventListener("storage",ev=>{
-    if(["autoBundle","valueCounts","correlation","filename"].includes(ev.key)){
-      if(page==="visualization") initVisualizationPage();
-      if(page==="dashboard") previewDataset();
-    }
-  });
-});
-
-/* ---------------- Expose for console/debug ---------------- */
-window.previewDataset=previewDataset;
-window.generateAISummary=generateAISummary;
-window.runAnalysis=runAnalysis;
-window.autoExplore=autoExplore;
-window.renderValueCounts=renderValueCounts;
-window.renderInteractiveCorrelation=renderInteractiveCorrelation;
-window.renderCorrTable=renderCorrTable;
-window.ensureCorrelation=ensureCorrelation;
-window.renderPCA=renderPCA;
-window.renderKMeans=renderKMeans;
-window.renderAssoc=renderAssoc;
-window.renderSummary=renderSummary;
-window.renderAINarrative=renderAINarrative;
-window.renderOverview=renderOverview;
-window.downloadCorrelationCSV=downloadCorrelationCSV;
-window.downloadCorrelationPNG=downloadCorrelationPNG;
-window.clearAnalysis=clearAnalysis;
-window.handleApi=handleApi;
-window.downloadMarkdownReport=downloadMarkdownReport;
-window.downloadPdfReport=downloadPdfReport;
-window.downloadChart=downloadChart;
-window.exportDataCsv=exportDataCsv;
-window.smartSearch=smartSearch;
-window.fetchFromInternet=fetchFromInternet;
-window.uploadDataset=uploadDataset;
-window.applyCleaning=applyCleaning;
-window.inferColumnTypes=inferColumnTypes;
