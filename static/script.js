@@ -276,8 +276,20 @@ async function runAnalysis(){
       case "summary":      lsSet("summary",data.summary); inferColumnTypes(); break;
       case "correlation":  lsSet("correlation",compressCorr(data.correlation)); break;
       case "value_counts": lsSet("valueCounts",{labels:data.labels,values:data.values,title:data.title}); break;
-      case "pca":          lsSet("pca",{components:data.components,explained:data.explained_variance,columns:data.columns}); break;
-      case "kmeans":       lsSet("kmeans",{labels_preview:data.labels,centers:data.centers,columns:data.columns}); break;
+      case "pca":          lsSet("pca",{
+        components_2d:data.components,
+        components:data.components,
+        explained:data.explained_variance,
+        explained_variance:data.explained_variance,
+        columns:data.columns
+      }); break;
+      case "kmeans":       lsSet("kmeans",{
+        labels_preview:data.labels,
+        labels:data.labels,
+        centers:data.centers,
+        columns:data.columns,
+        components_2d:data.components_2d
+      }); break;
       case "assoc_rules":  lsSet("assoc",data.rules); break;
     }
     $("analysis-status")&&( $("analysis-status").textContent="Done ✓");
@@ -325,7 +337,18 @@ const stripFences = str => typeof str==="string"
 function cleanAIBlock(objOrStr){
   if(typeof objOrStr === "string"){
     const s = stripFences(objOrStr);
-    try { return JSON.parse(s); } catch { return {summary:s}; }
+    try { 
+      return JSON.parse(s); 
+    } catch { 
+      // If parsing fails, try to extract meaningful content
+      const lines = s.split('\n').filter(line => line.trim());
+      return {
+        summary: lines.slice(0, 2).join(' ') || s.substring(0, 200),
+        key_points: lines.filter(line => line.includes('•') || line.includes('-') || line.includes('*')).slice(0, 5),
+        anomalies: lines.filter(line => line.toLowerCase().includes('anomal') || line.toLowerCase().includes('outlier')).slice(0, 3),
+        recommendation: lines.find(line => line.toLowerCase().includes('recommend')) || ""
+      };
+    }
   }
   if(!objOrStr || typeof objOrStr !== "object") return objOrStr;
   return {
@@ -422,6 +445,9 @@ async function autoExplore(){
 function storeAutoBundle(result){
   const b=result.bundle, ai=result.ai;
   lsSet("autoBundle",b);
+  
+  console.log("Storing auto bundle:", b); // Debug log
+  
   if(b?.summary)           lsSet("summary",b.summary);
   if(b?.correlation_matrix)lsSet("correlation",compressCorr(b.correlation_matrix));
   if(b?.categorical){
@@ -433,8 +459,32 @@ function storeAutoBundle(result){
         title:`Top ${first}`});
     }
   }
-  if(b?.pca)     lsSet("pca",{components_2d:b.pca.components_2d,explained:b.pca.explained_variance});
-  if(b?.kmeans)  lsSet("kmeans",{labels_preview:b.kmeans.labels_preview,centers:b.kmeans.centers});
+  
+  // Store PCA data
+  if(b?.pca) {
+    const pcaData = {
+      components_2d: b.pca.components_2d,
+      explained: b.pca.explained_variance,
+      explained_variance: b.pca.explained_variance // Store both keys for compatibility
+    };
+    console.log("Storing PCA data:", pcaData); // Debug log
+    lsSet("pca", pcaData);
+  }
+  
+  // Store K-means data
+  if(b?.kmeans) {
+    const kmeansData = {
+      labels_preview: b.kmeans.labels_preview,
+      labels: b.kmeans.labels, // Store full labels too
+      centers: b.kmeans.centers,
+      components_2d: b.kmeans.components_2d,
+      columns: b.kmeans.columns,
+      k: b.kmeans.k
+    };
+    console.log("Storing K-means data:", kmeansData); // Debug log
+    lsSet("kmeans", kmeansData);
+  }
+  
   if(b?.assoc_rules) lsSet("assoc",b.assoc_rules);
   if(ai)         lsSet("autoAI", cleanAIBlock(ai));
 }
@@ -755,8 +805,14 @@ function copyToClipboard(txt){
 function renderPCA(){
   const pca=lsGet("pca")||lsGet("autoBundle")?.pca;
   const box=$("pca-box")||$("pca-container"); if(!box) return;
+  
+  console.log("PCA data:", pca); // Debug output
+  
   const comps=pca?.components_2d || pca?.components;
-  if(!comps){ box.innerHTML="<p class='text-small text-dim'>No PCA data.</p>"; return; }
+  if(!comps || !comps.length){ 
+    box.innerHTML="<p class='text-small text-dim'>No PCA data. Run PCA analysis or Auto Explore with ≥2 numeric columns.</p>"; 
+    return; 
+  }
   // Robust scaling: trim outliers, pad axes
   let pts=comps.map(p=>({x:p[0],y:p[1]}));
   // Outlier trimming (1st-99th percentile)
@@ -773,14 +829,32 @@ function renderPCA(){
   const ctx=$("pca-canvas").getContext("2d");
   if(VizCharts.pca) VizCharts.pca.destroy();
   VizCharts.pca=new Chart(ctx,{type:"scatter",
-    data:{datasets:[{label:"PCA",data:pts}]},
+    data:{datasets:[{label:"PCA",data:pts,backgroundColor:"#3b82f6",borderColor:"#1d4ed8"}]},
     options:{responsive:true,plugins:{legend:{display:false}},
       scales:{
-        x:{min:minX,max:maxX,ticks:{color:getCss('--text-dim')}},
-        y:{min:minY,max:maxY,ticks:{color:getCss('--text-dim')}}
+        x:{min:minX,max:maxX,ticks:{color:getCss('--text-dim')},title:{display:true,text:"PC1"}},
+        y:{min:minY,max:maxY,ticks:{color:getCss('--text-dim')},title:{display:true,text:"PC2"}}
       }
     }
   });
+  
+  // Show explained variance if available
+  if(pca?.explained_variance || pca?.explained) {
+    const variance = pca.explained_variance || pca.explained;
+    if(variance && variance.length >= 2) {
+      const pc1_var = (variance[0] * 100).toFixed(1);
+      const pc2_var = (variance[1] * 100).toFixed(1);
+      const total_var = ((variance[0] + variance[1]) * 100).toFixed(1);
+      
+      // Add variance info below the chart
+      const infoDiv = document.createElement('div');
+      infoDiv.className = 'text-small text-dim';
+      infoDiv.style.marginTop = '0.5rem';
+      infoDiv.innerHTML = `PC1: ${pc1_var}% | PC2: ${pc2_var}% | Total: ${total_var}% variance explained`;
+      box.appendChild(infoDiv);
+    }
+  }
+  
   syncExportButtons();
 }
 
@@ -788,11 +862,27 @@ function renderPCA(){
 function renderKMeans(){
   const km=lsGet("kmeans")||lsGet("autoBundle")?.kmeans;
   const box=$("kmeans-box")||$("kmeans-container"); if(!box) return;
+  
+  console.log("K-means data:", km); // Debug output
+  
   const labels=km?.labels_preview || km?.labels;
   const comps=km?.components_2d || km?.components;
-  if(!labels||!comps){ box.innerHTML="<p class='text-small text-dim'>No clustering data.</p>"; return; }
+  
+  console.log("Labels:", labels, "Components:", comps); // Debug output
+  
+  if(!labels||!comps){ 
+    box.innerHTML="<p class='text-small text-dim'>No clustering data available. Try running Auto Explore or K-means analysis.</p>"; 
+    return; 
+  }
+  
+  // Ensure we have matching array lengths
+  const minLength = Math.min(labels.length, comps.length);
+  const labelsSubset = labels.slice(0, minLength);
+  const compsSubset = comps.slice(0, minLength);
+  
   // Use 2D components for scatter, color by label
-  let pts=comps.map((p,i)=>({x:p[0],y:p[1],c:labels[i]}));
+  let pts=compsSubset.map((p,i)=>({x:p[0],y:p[1],c:labelsSubset[i]}));
+  
   // Outlier trimming and scaling
   function getBounds(arr, key) {
     const vals = arr.map(o=>o[key]).sort((a,b)=>a-b);
@@ -812,8 +902,8 @@ function renderKMeans(){
     data:{datasets:Object.entries(clusters).map(([lab,pts],i)=>({label:`Cluster ${lab}`,data:pts,backgroundColor:colors[i%colors.length]}))},
     options:{responsive:true,plugins:{legend:{display:true}},
       scales:{
-        x:{min:minX,max:maxX,ticks:{color:getCss('--text-dim')}},
-        y:{min:minY,max:maxY,ticks:{color:getCss('--text-dim')}}
+        x:{min:minX,max:maxX,ticks:{color:getCss('--text-dim')},title:{display:true,text:"Component 1"}},
+        y:{min:minY,max:maxY,ticks:{color:getCss('--text-dim')},title:{display:true,text:"Component 2"}}
       }
     }
   });
@@ -880,15 +970,45 @@ function renderAINarrative(){
       : "";
 
   let html = "";
-  if(ai.summary) html += `<p style="font-size:.66rem;line-height:1.45">${ai.summary}</p>`;
-  html += list("Key Points", ai.key_points);
-  html += list("Anomalies",  ai.anomalies);
+  
+  // Handle different AI response structures
+  if(ai.overview) html += `<p style="font-size:.66rem;line-height:1.45;margin-bottom:.6rem;"><strong>Overview:</strong> ${ai.overview}</p>`;
+  else if(ai.summary) html += `<p style="font-size:.66rem;line-height:1.45;margin-bottom:.6rem;"><strong>Summary:</strong> ${ai.summary}</p>`;
+  
+  html += list("Key Findings", ai.key_findings || ai.key_points);
+  html += list("Correlations", ai.correlations_comment ? [ai.correlations_comment] : []);
+  html += list("Clusters", ai.clusters_comment ? [ai.clusters_comment] : []);
+  html += list("PCA Insights", ai.pca_comment ? [ai.pca_comment] : []);
+  html += list("Categorical Insights", ai.categorical_insights);
+  html += list("Potential Issues", ai.potential_issues || ai.anomalies);
+  
   if(ai.recommendation){
     html += `<p style="font-size:.6rem;"><strong>Recommendation:</strong> ${ai.recommendation}</p>`;
   }
   html += list("Next Steps", ai.next_steps);
+  html += list("Chart Priorities", ai.chart_priorities);
 
-  box.innerHTML = html || "<em>AI narrative present but unstructured.</em>";
+  // If still no structured content, try to display raw content
+  if(!html.trim()){
+    if(typeof raw === "string"){
+      html = `<div style="font-size:.6rem;line-height:1.4;white-space:pre-wrap;">${raw}</div>`;
+    } else {
+      // Better formatting for unstructured data
+      const keys = Object.keys(raw);
+      html = keys.map(key => {
+        const value = raw[key];
+        if(Array.isArray(value) && value.length) {
+          return `<strong style="font-size:.62rem;">${key.replace(/_/g, ' ').toUpperCase()}:</strong>
+                  <ul style="font-size:.6rem;margin:.35rem 0 .6rem 1rem;">${value.map(x=>`<li>${x}</li>`).join("")}</ul>`;
+        } else if(typeof value === 'string' && value.trim()) {
+          return `<p style="font-size:.6rem;margin:.3rem 0;"><strong>${key.replace(/_/g, ' ')}:</strong> ${value}</p>`;
+        }
+        return '';
+      }).filter(x => x).join('') || "<em>AI narrative present but unstructured.</em>";
+    }
+  }
+
+  box.innerHTML = html || "<em>AI narrative present but could not be parsed.</em>";
 }
 
 /* ---------- Overview ---------- */

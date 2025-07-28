@@ -1225,6 +1225,128 @@ def report_markdown():
     except Exception as e:
         return fail(f"Report generation failed: {e}", 500)
 
+def generate_charts_for_pdf(bundle):
+    """Generate chart images for PDF report inclusion"""
+    if not MATPLOTLIB_OK:
+        return {}
+    
+    charts = {}
+    
+    try:
+        # Value Counts Chart
+        if bundle.get("categorical"):
+            for col_name, values in list(bundle["categorical"].items())[:1]:  # Just first categorical
+                fig, ax = plt.subplots(figsize=(8, 6))
+                labels = [item['value'] for item in values[:10]]
+                counts = [item['count'] for item in values[:10]]
+                
+                ax.bar(range(len(labels)), counts, color='#3b82f6')
+                ax.set_xlabel('Categories')
+                ax.set_ylabel('Count')
+                ax.set_title(f'Value Counts: {col_name}')
+                ax.set_xticks(range(len(labels)))
+                ax.set_xticklabels(labels, rotation=45, ha='right')
+                
+                plt.tight_layout()
+                
+                # Save to memory
+                img_buffer = io.BytesIO()
+                plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')
+                img_buffer.seek(0)
+                charts['value_counts'] = img_buffer
+                plt.close()
+                break
+        
+        # Correlation Heatmap
+        if bundle.get("correlation_matrix"):
+            corr_matrix = bundle["correlation_matrix"]
+            df_corr = pd.DataFrame(corr_matrix)
+            
+            if not df_corr.empty:
+                fig, ax = plt.subplots(figsize=(10, 8))
+                im = ax.imshow(df_corr.values, cmap='RdBu_r', aspect='auto', vmin=-1, vmax=1)
+                
+                # Set ticks and labels
+                ax.set_xticks(range(len(df_corr.columns)))
+                ax.set_yticks(range(len(df_corr.columns)))
+                ax.set_xticklabels(df_corr.columns, rotation=45, ha='right')
+                ax.set_yticklabels(df_corr.columns)
+                
+                # Add colorbar
+                plt.colorbar(im, ax=ax)
+                ax.set_title('Correlation Matrix')
+                
+                plt.tight_layout()
+                
+                img_buffer = io.BytesIO()
+                plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')
+                img_buffer.seek(0)
+                charts['correlation'] = img_buffer
+                plt.close()
+        
+        # PCA Scatter Plot
+        if bundle.get("pca") and bundle["pca"].get("components_2d"):
+            components = bundle["pca"]["components_2d"]
+            if len(components) > 0:
+                fig, ax = plt.subplots(figsize=(8, 6))
+                
+                x_vals = [comp[0] for comp in components]
+                y_vals = [comp[1] for comp in components]
+                
+                ax.scatter(x_vals, y_vals, alpha=0.6, color='#3b82f6')
+                ax.set_xlabel('Principal Component 1')
+                ax.set_ylabel('Principal Component 2')
+                ax.set_title('PCA Scatter Plot')
+                ax.grid(True, alpha=0.3)
+                
+                plt.tight_layout()
+                
+                img_buffer = io.BytesIO()
+                plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')
+                img_buffer.seek(0)
+                charts['pca'] = img_buffer
+                plt.close()
+        
+        # K-means Clustering
+        if bundle.get("kmeans") and bundle["kmeans"].get("components_2d") and bundle["kmeans"].get("labels_preview"):
+            components = bundle["kmeans"]["components_2d"]
+            labels = bundle["kmeans"]["labels_preview"]
+            
+            if len(components) > 0 and len(labels) > 0:
+                fig, ax = plt.subplots(figsize=(8, 6))
+                
+                # Ensure matching lengths
+                min_len = min(len(components), len(labels))
+                components = components[:min_len]
+                labels = labels[:min_len]
+                
+                x_vals = [comp[0] for comp in components]
+                y_vals = [comp[1] for comp in components]
+                
+                # Create scatter plot with different colors for each cluster
+                scatter = ax.scatter(x_vals, y_vals, c=labels, cmap='tab10', alpha=0.7)
+                ax.set_xlabel('Component 1')
+                ax.set_ylabel('Component 2')
+                ax.set_title('K-means Clustering')
+                ax.grid(True, alpha=0.3)
+                
+                # Add legend
+                if len(set(labels)) <= 10:  # Only add legend if reasonable number of clusters
+                    plt.colorbar(scatter, ax=ax, label='Cluster')
+                
+                plt.tight_layout()
+                
+                img_buffer = io.BytesIO()
+                plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')
+                img_buffer.seek(0)
+                charts['kmeans'] = img_buffer
+                plt.close()
+    
+    except Exception as e:
+        print(f"Error generating charts: {e}")
+    
+    return charts
+
 def generate_comprehensive_pdf_report(bundle, ai, filename):
     """Generate a comprehensive PDF report with proper formatting, tables, and charts"""
     buffer = io.BytesIO()
@@ -1278,6 +1400,14 @@ def generate_comprehensive_pdf_report(bundle, ai, filename):
         leading=12
     )
     
+    # Generate charts if matplotlib is available
+    chart_images = {}
+    if MATPLOTLIB_OK:
+        chart_images = generate_charts_for_pdf(bundle)
+    
+    # Import Image for chart inclusion
+    from reportlab.platypus import Image
+    
     # Story to hold the content
     story = []
     
@@ -1319,26 +1449,73 @@ def generate_comprehensive_pdf_report(bundle, ai, filename):
     if ai:
         story.append(Paragraph("AI-Generated Insights", heading_style))
         
-        if ai.get("summary"):
-            story.append(Paragraph("Summary", subheading_style))
-            story.append(Paragraph(ai["summary"], normal_style))
+        # Handle both old and new AI structure formats
+        overview = ai.get("overview") or ai.get("summary", "")
+        if overview:
+            story.append(Paragraph("Overview", subheading_style))
+            story.append(Paragraph(overview, normal_style))
             story.append(Spacer(1, 10))
         
-        if ai.get("key_points"):
+        # Key findings (handle both key_points and key_findings)
+        key_findings = ai.get("key_findings") or ai.get("key_points", [])
+        if key_findings:
             story.append(Paragraph("Key Findings", subheading_style))
-            for point in ai["key_points"]:
+            for point in key_findings:
                 story.append(Paragraph(f"• {point}", normal_style))
             story.append(Spacer(1, 10))
         
-        if ai.get("anomalies"):
-            story.append(Paragraph("Anomalies Detected", subheading_style))
-            for anomaly in ai["anomalies"]:
-                story.append(Paragraph(f"• {anomaly}", normal_style))
+        # Correlations comment
+        if ai.get("correlations_comment"):
+            story.append(Paragraph("Correlation Insights", subheading_style))
+            story.append(Paragraph(ai["correlations_comment"], normal_style))
             story.append(Spacer(1, 10))
         
-        if ai.get("recommendation"):
+        # Clusters comment
+        if ai.get("clusters_comment"):
+            story.append(Paragraph("Clustering Insights", subheading_style))
+            story.append(Paragraph(ai["clusters_comment"], normal_style))
+            story.append(Spacer(1, 10))
+        
+        # PCA comment
+        if ai.get("pca_comment"):
+            story.append(Paragraph("PCA Insights", subheading_style))
+            story.append(Paragraph(ai["pca_comment"], normal_style))
+            story.append(Spacer(1, 10))
+        
+        # Categorical insights
+        if ai.get("categorical_insights"):
+            story.append(Paragraph("Categorical Data Insights", subheading_style))
+            for insight in ai["categorical_insights"]:
+                story.append(Paragraph(f"• {insight}", normal_style))
+            story.append(Spacer(1, 10))
+        
+        # Potential issues (handle both potential_issues and anomalies)
+        issues = ai.get("potential_issues") or ai.get("anomalies", [])
+        if issues:
+            story.append(Paragraph("Potential Issues", subheading_style))
+            for issue in issues:
+                story.append(Paragraph(f"• {issue}", normal_style))
+            story.append(Spacer(1, 10))
+        
+        # Recommendations
+        recommendation = ai.get("recommendation")
+        if recommendation:
             story.append(Paragraph("Recommendations", subheading_style))
-            story.append(Paragraph(ai["recommendation"], normal_style))
+            story.append(Paragraph(recommendation, normal_style))
+            story.append(Spacer(1, 10))
+        
+        # Next steps
+        if ai.get("next_steps"):
+            story.append(Paragraph("Next Steps", subheading_style))
+            for step in ai["next_steps"]:
+                story.append(Paragraph(f"• {step}", normal_style))
+            story.append(Spacer(1, 10))
+        
+        # Chart priorities
+        if ai.get("chart_priorities"):
+            story.append(Paragraph("Recommended Chart Priorities", subheading_style))
+            for i, chart in enumerate(ai["chart_priorities"], 1):
+                story.append(Paragraph(f"{i}. {chart}", normal_style))
             story.append(Spacer(1, 10))
     
     story.append(PageBreak())
@@ -1392,6 +1569,13 @@ def generate_comprehensive_pdf_report(bundle, ai, filename):
     # Top Correlations
     if bundle.get("top_correlations"):
         story.append(Paragraph("Top Correlations", heading_style))
+        
+        # Add correlation heatmap if available
+        if 'correlation' in chart_images:
+            img = Image(chart_images['correlation'], width=6*inch, height=4.5*inch)
+            story.append(img)
+            story.append(Spacer(1, 10))
+        
         corr_data = [["Variable A", "Variable B", "Correlation"]]
         
         for a, b, corr in bundle["top_correlations"][:10]:
@@ -1413,6 +1597,12 @@ def generate_comprehensive_pdf_report(bundle, ai, filename):
     # Categorical Analysis
     if bundle.get("categorical"):
         story.append(Paragraph("Categorical Data Analysis", heading_style))
+        
+        # Add value counts chart if available
+        if 'value_counts' in chart_images:
+            img = Image(chart_images['value_counts'], width=6*inch, height=4.5*inch)
+            story.append(img)
+            story.append(Spacer(1, 10))
         
         for col_name, values in list(bundle["categorical"].items())[:3]:  # Show top 3 categorical columns
             story.append(Paragraph(f"Distribution: {col_name}", subheading_style))
@@ -1448,6 +1638,12 @@ def generate_comprehensive_pdf_report(bundle, ai, filename):
         story.append(Paragraph("Principal Component Analysis (PCA)", subheading_style))
         pca = bundle["pca"]
         
+        # Add PCA scatter plot if available
+        if 'pca' in chart_images:
+            img = Image(chart_images['pca'], width=6*inch, height=4.5*inch)
+            story.append(img)
+            story.append(Spacer(1, 10))
+        
         if pca.get("explained_variance"):
             story.append(Paragraph("Explained Variance by Component:", normal_style))
             pca_data = [["Component", "Explained Variance", "Cumulative"]]
@@ -1474,6 +1670,12 @@ def generate_comprehensive_pdf_report(bundle, ai, filename):
     if bundle.get("kmeans"):
         story.append(Paragraph("K-Means Clustering", subheading_style))
         kmeans = bundle["kmeans"]
+        
+        # Add K-means clustering visualization if available
+        if 'kmeans' in chart_images:
+            img = Image(chart_images['kmeans'], width=6*inch, height=4.5*inch)
+            story.append(img)
+            story.append(Spacer(1, 10))
         
         story.append(Paragraph(f"Optimal number of clusters: {kmeans.get('k', '?')}", normal_style))
         

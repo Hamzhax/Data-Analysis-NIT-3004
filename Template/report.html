@@ -2,65 +2,133 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Data Report – {{ filename }}</title>
+<title>Data Mining Report – {{ filename }}</title>
 <style>
-  body{font-family:Inter,Arial,sans-serif;color:#1e293b;margin:32px 36px 40px;font-size:12px;line-height:1.45;}
-  h1,h2,h3{margin:0 0 8px;color:#0f172a;}
-  h1{font-size:24px;}
-  h2{font-size:18px;margin-top:26px;}
-  h3{font-size:14px;margin-top:18px;}
+  body{font-family:Inter,Arial,sans-serif;color:#1e293b;margin:24px 32px 40px;font-size:12px;line-height:1.5;}
+  h1,h2,h3{margin:0 0 12px;color:#0f172a;font-weight:600;}
+  h1{font-size:28px;border-bottom:3px solid #3b82f6;padding-bottom:8px;margin-bottom:16px;}
+  h2{font-size:20px;margin-top:32px;color:#1e40af;border-left:4px solid #3b82f6;padding-left:12px;}
+  h3{font-size:16px;margin-top:20px;color:#374151;}
   .muted{color:#64748b;font-size:11px;}
-  .section{margin-bottom:26px;}
-  table{border-collapse:collapse;width:100%;font-size:11px;margin-top:6px;}
-  th,td{border:1px solid #cbd5e1;padding:4px 6px;text-align:right;}
+  .section{margin-bottom:32px;background:#fafbfc;padding:16px;border-radius:8px;border:1px solid #e2e8f0;}
+  table{border-collapse:collapse;width:100%;font-size:11px;margin:8px 0;box-shadow:0 1px 3px rgba(0,0,0,0.1);}
+  th,td{border:1px solid #d1d5db;padding:6px 8px;text-align:right;}
   th:first-child,td:first-child{text-align:left;}
-  thead th{background:#f1f5f9;font-weight:600;}
-  .badge{display:inline-block;padding:2px 6px;border-radius:6px;background:#e2e8f0;font-size:10px;margin-right:4px;}
-  .ai-block p{margin:2px 0 6px;}
-  ul{margin:4px 0 8px 18px;}
-  img{max-width:100%;display:block;margin:6px 0 8px;}
-  .small{font-size:10px;color:#475569;}
+  thead th{background:#f3f4f6;font-weight:600;color:#374151;}
+  tbody tr:nth-child(even){background:#f9fafb;}
+  .badge{display:inline-block;padding:4px 8px;border-radius:12px;background:#dbeafe;color:#1e40af;font-size:10px;margin:2px 4px 2px 0;font-weight:500;}
+  .ai-block{background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:12px;margin:8px 0;}
+  .ai-block p{margin:4px 0 8px;line-height:1.6;}
+  .ai-block strong{color:#0369a1;}
+  ul{margin:6px 0 12px 20px;line-height:1.6;}
+  li{margin-bottom:3px;}
+  img{max-width:100%;display:block;margin:12px auto;border:1px solid #e5e7eb;border-radius:6px;box-shadow:0 2px 4px rgba(0,0,0,0.1);}
+  .small{font-size:10px;color:#6b7280;line-height:1.4;}
   .pagebreak{page-break-before:always;}
+  .chart-container{text-align:center;margin:16px 0;background:white;padding:12px;border-radius:6px;border:1px solid #e5e7eb;}
+  .insights-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:12px 0;}
+  .insight-card{background:white;padding:12px;border-radius:6px;border:1px solid #e5e7eb;}
+  .insight-card h4{margin:0 0 8px;font-size:12px;color:#374151;}
+  .insight-card p{margin:0;font-size:11px;color:#6b7280;}
+  .metric-value{font-size:18px;font-weight:600;color:#1e40af;}
 </style>
 </head>
 <body>
 
-<h1>Data Mining Report</h1>
-<p class="muted">{{ today }} • File: <strong>{{ filename }}</strong> • NIT 3004 H2B1</p>
-
+<h1>📊 Data Mining Report</h1>
+<p class="muted">Generated on {{ today }} • Dataset: <strong>{{ filename }}</strong> • NIT 3004 H2B1 Analytics Platform</p>
 
 <div class="section">
-  <h2>1. Dataset Overview</h2>
-  <p class="small">Core meta information from Auto Explore. Includes row/column counts, data type breakdown, and column names.</p>
+  <h2>🎯 Executive Summary</h2>
+  <p class="small">Comprehensive analysis results from automated data exploration and mining processes.</p>
   {% if meta %}
-    <span class="badge">{{ meta.rows or "?" }} rows</span>
-    <span class="badge">{{ meta.columns or "?" }} cols</span>
-    <span class="badge">{{ meta.numeric_cols or "?" }} numeric</span>
-    <span class="badge">{{ meta.categorical_cols or "?" }} categorical</span>
+    <div class="insights-grid">
+      <div class="insight-card">
+        <h4>Dataset Dimensions</h4>
+        <p class="metric-value">{{ meta.rows or "?" }}</p>
+        <p>Total Records</p>
+      </div>
+      <div class="insight-card">
+        <h4>Feature Count</h4>
+        <p class="metric-value">{{ meta.columns or "?" }}</p>
+        <p>Total Columns</p>
+      </div>
+      <div class="insight-card">
+        <h4>Numeric Features</h4>
+        <p class="metric-value">{{ meta.numeric_cols or "?" }}</p>
+        <p>Quantitative Variables</p>
+      </div>
+      <div class="insight-card">
+        <h4>Categorical Features</h4>
+        <p class="metric-value">{{ meta.categorical_cols or "?" }}</p>
+        <p>Qualitative Variables</p>
+      </div>
+    </div>
     {% if meta.columns_list %}
-      <div class="small" style="margin-top:6px;"><strong>Columns:</strong> {{ meta.columns_list|join(", ") }}</div>
+      <div class="small" style="margin-top:12px;"><strong>Variables:</strong> {{ meta.columns_list|join(", ") }}</div>
     {% endif %}
   {% else %}
-    <p>No meta captured.</p>
+    <p>Dataset metadata not available.</p>
   {% endif %}
 </div>
 
-
 <div class="section">
-  <h2>2. AI Narrative</h2>
+  <h2>🤖 AI Insights & Recommendations</h2>
   <p class="small">Automated AI-generated summary, key findings, anomalies, and recommendations for your dataset. This section provides a high-level, human-readable interpretation of the data.</p>
   {% if ai %}
     <div class="ai-block">
-      {% if ai.summary %}<p><strong>Summary:</strong> {{ ai.summary }}</p>{% endif %}
-      {% if ai.key_points %}
+      {% if ai.overview %}
+        <p><strong>Overview:</strong> {{ ai.overview }}</p>
+      {% elif ai.summary %}
+        <p><strong>Summary:</strong> {{ ai.summary }}</p>
+      {% endif %}
+      
+      {% if ai.key_findings %}
+        <p><strong>Key Findings:</strong></p>
+        <ul>{% for k in ai.key_findings %}<li>{{ k }}</li>{% endfor %}</ul>
+      {% elif ai.key_points %}
         <p><strong>Key Points:</strong></p>
         <ul>{% for k in ai.key_points %}<li>{{ k }}</li>{% endfor %}</ul>
       {% endif %}
-      {% if ai.anomalies %}
+      
+      {% if ai.correlations_comment %}
+        <p><strong>Correlation Insights:</strong> {{ ai.correlations_comment }}</p>
+      {% endif %}
+      
+      {% if ai.clusters_comment %}
+        <p><strong>Clustering Insights:</strong> {{ ai.clusters_comment }}</p>
+      {% endif %}
+      
+      {% if ai.pca_comment %}
+        <p><strong>PCA Insights:</strong> {{ ai.pca_comment }}</p>
+      {% endif %}
+      
+      {% if ai.categorical_insights %}
+        <p><strong>Categorical Insights:</strong></p>
+        <ul>{% for insight in ai.categorical_insights %}<li>{{ insight }}</li>{% endfor %}</ul>
+      {% endif %}
+      
+      {% if ai.potential_issues %}
+        <p><strong>Potential Issues:</strong></p>
+        <ul>{% for issue in ai.potential_issues %}<li>{{ issue }}</li>{% endfor %}</ul>
+      {% elif ai.anomalies %}
         <p><strong>Anomalies:</strong></p>
         <ul>{% for a in ai.anomalies %}<li>{{ a }}</li>{% endfor %}</ul>
       {% endif %}
-      {% if ai.recommendation %}<p><strong>Recommendation:</strong> {{ ai.recommendation }}</p>{% endif %}
+      
+      {% if ai.recommendation %}
+        <p><strong>Recommendation:</strong> {{ ai.recommendation }}</p>
+      {% endif %}
+      
+      {% if ai.next_steps %}
+        <p><strong>Next Steps:</strong></p>
+        <ul>{% for step in ai.next_steps %}<li>{{ step }}</li>{% endfor %}</ul>
+      {% endif %}
+      
+      {% if ai.chart_priorities %}
+        <p><strong>Chart Priorities:</strong></p>
+        <ol>{% for chart in ai.chart_priorities %}<li>{{ chart }}</li>{% endfor %}</ol>
+      {% endif %}
     </div>
   {% else %}
     <p>No AI insight generated.</p>
@@ -69,72 +137,95 @@
 
 <div class="pagebreak"></div>
 
-
 <div class="section">
-  <h2>3. Value Counts</h2>
-  <p class="small">Distribution of categorical values (top categories shown below). This helps identify dominant categories and class imbalance.</p>
+  <h2>📊 Value Counts Analysis</h2>
+  <p class="small">Distribution of categorical values showing the frequency of top categories. This analysis helps identify dominant patterns, class imbalance, and data distribution characteristics.</p>
   {% if charts.value_counts %}
-    <img src="{{ charts.value_counts }}" alt="Value Counts Chart">
+    <div class="chart-container">
+      <img src="{{ charts.value_counts }}" alt="Value Counts Distribution Chart">
+    </div>
   {% endif %}
   {% if vc.labels %}
     <table>
-      <thead><tr><th>Label</th><th>Count</th></tr></thead>
+      <thead><tr><th>Category</th><th>Count</th><th>Percentage</th></tr></thead>
       <tbody>
+        {% set total = vc.values|sum %}
         {% for l,v in vc.labels|zip(vc.values) %}
-          <tr><td>{{ l }}</td><td>{{ v }}</td></tr>
+          <tr><td>{{ l }}</td><td>{{ v }}</td><td>{{ "%.1f" % ((v/total)*100) if total > 0 else "0.0" }}%</td></tr>
         {% endfor %}
       </tbody>
     </table>
   {% else %}
-    <p>No value counts recorded.</p>
+    <p>No categorical data available for value count analysis.</p>
   {% endif %}
 </div>
 
-
 <div class="section">
-  <h2>4. Correlation Matrix (Top 10 pairs)</h2>
-  <p class="small">Top 10 strongest correlations between numeric columns (Pearson's r). This helps identify relationships and multicollinearity in your data.</p>
+  <h2>🔗 Correlation Analysis</h2>
+  <p class="small">Top correlations between numeric variables (Pearson correlation coefficient). Strong correlations (|r| > 0.7) indicate potential relationships or multicollinearity.</p>
+  {% if charts.correlation %}
+    <div class="chart-container">
+      <img src="{{ charts.correlation }}" alt="Correlation Heatmap">
+    </div>
+  {% endif %}
   {% if top_corr %}
   <table>
-    <thead><tr><th>Col A</th><th>Col B</th><th>r</th></tr></thead>
+    <thead><tr><th>Variable A</th><th>Variable B</th><th>Correlation (r)</th><th>Strength</th></tr></thead>
     <tbody>
-      {% for a,b,absr,r in top_corr %}
-        <tr><td>{{ a }}</td><td>{{ b }}</td><td>{{ '%.4f' % r }}</td></tr>
+      {% for pair in top_corr %}
+        {% set abs_r = pair.r|abs %}
+        {% set strength = "Very Strong" if abs_r >= 0.9 else "Strong" if abs_r >= 0.7 else "Moderate" if abs_r >= 0.5 else "Weak" %}
+        <tr>
+          <td>{{ pair.col_a }}</td>
+          <td>{{ pair.col_b }}</td>
+          <td>{{ "%.3f" % pair.r }}</td>
+          <td>{{ strength }}</td>
+        </tr>
       {% endfor %}
     </tbody>
   </table>
   {% else %}
-    <p>No correlation found.</p>
+    <p>No correlation data available.</p>
   {% endif %}
 </div>
 
 <div class="pagebreak"></div>
 
-
 <div class="section">
-  <h2>5. PCA (Principal Component Analysis)</h2>
-  <p class="small">PCA reduces dimensionality and visualizes the main variance in your data. The scatter plot shows the first two principal components, and the table shows explained variance for each component.</p>
+  <h2>🎯 Principal Component Analysis (PCA)</h2>
+  <p class="small">Dimensionality reduction technique that identifies the main directions of variance in the data. The scatter plot shows data points projected onto the first two principal components.</p>
   {% if charts.pca %}
-    <img src="{{ charts.pca }}" alt="PCA Scatter">
+    <div class="chart-container">
+      <img src="{{ charts.pca }}" alt="PCA Scatter Plot">
+    </div>
   {% endif %}
-  {% if pca.explained %}
+  {% if pca.explained_variance %}
     <table>
-      <thead><tr><th>Component</th><th>Explained Variance</th></tr></thead>
+      <thead><tr><th>Component</th><th>Explained Variance</th><th>Cumulative</th></tr></thead>
       <tbody>
-        {% for v in pca.explained %}
-          <tr><td>PC{{ loop.index }}</td><td>{{ '%.4f' % v }}</td></tr>
+        {% set cumulative = [] %}
+        {% for variance in pca.explained_variance %}
+          {% if cumulative.append((cumulative[-1] if cumulative else 0) + variance) %}{% endif %}
+          <tr>
+            <td>PC{{ loop.index }}</td>
+            <td>{{ "%.1f" % (variance * 100) }}%</td>
+            <td>{{ "%.1f" % (cumulative[-1] * 100) }}%</td>
+          </tr>
         {% endfor %}
       </tbody>
     </table>
+  {% else %}
+    <p>No PCA analysis available.</p>
   {% endif %}
 </div>
 
-
 <div class="section">
-  <h2>6. KMeans Clustering</h2>
-  <p class="small">KMeans clustering groups data into clusters. The scatter plot shows clusters in PCA space, and the table lists cluster centers for each dimension.</p>
+  <h2>🎭 K-Means Clustering</h2>
+  <p class="small">Unsupervised clustering algorithm that groups similar data points. The visualization shows clusters in PCA space with different colors representing different groups.</p>
   {% if charts.kmeans %}
-    <img src="{{ charts.kmeans }}" alt="KMeans">
+    <div class="chart-container">
+      <img src="{{ charts.kmeans }}" alt="K-Means Clustering Visualization">
+    </div>
   {% endif %}
   {% if kmeans.centers %}
     <table>
@@ -143,24 +234,30 @@
       </thead>
       <tbody>
         {% for center in kmeans.centers %}
-          <tr><td>{{ loop.index0 }}</td>
+          <tr><td>Cluster {{ loop.index0 }}</td>
           {% for val in center %}<td>{{ '%.4f' % val if val is number else val }}</td>{% endfor %}
           </tr>
         {% endfor %}
       </tbody>
     </table>
+  {% else %}
+    <p>No clustering analysis available.</p>
   {% endif %}
 </div>
 
-
 <div class="section">
-  <h2>7. Association Rules (Top 50)</h2>
-  <p class="small">Top 50 association rules discovered (antecedents, consequents, and metrics). These rules help uncover relationships between categorical variables.</p>
+  <h2>⛏️ Association Rules Analysis</h2>
+  <p class="small">Market basket analysis revealing relationships between categorical variables. Rules show patterns like "if X then Y" with support, confidence, and lift metrics.</p>
+  {% if charts.assoc_rules %}
+    <div class="chart-container">
+      <img src="{{ charts.assoc_rules }}" alt="Association Rules Visualization">
+    </div>
+  {% endif %}
   {% if assoc %}
     <table>
       <thead><tr><th>Antecedents</th><th>Consequents</th><th>Support</th><th>Confidence</th><th>Lift</th></tr></thead>
       <tbody>
-        {% for r in assoc[:50] %}
+        {% for r in assoc[:25] %}
           <tr>
             <td>{{ r.antecedents if r.antecedents is string else (r.antecedents|join(', ')) }}</td>
             <td>{{ r.consequents if r.consequents is string else (r.consequents|join(', ')) }}</td>
@@ -172,18 +269,24 @@
       </tbody>
     </table>
   {% else %}
-    <p>No rules available.</p>
+    <p>No association rules discovered. Rules require categorical data with sufficient pattern frequency.</p>
   {% endif %}
 </div>
 
+<div class="pagebreak"></div>
 
 <div class="section">
-  <h2>8. Summary Statistics</h2>
-  <p class="small">Descriptive statistics for all numeric columns (mean, std, min, max, etc). This section provides a detailed breakdown for each column.</p>
+  <h2>📈 Statistical Summary</h2>
+  <p class="small">Comprehensive descriptive statistics for all numeric variables including central tendency, spread, and distribution characteristics.</p>
+  {% if charts.summary %}
+    <div class="chart-container">
+      <img src="{{ charts.summary }}" alt="Summary Statistics Visualization">
+    </div>
+  {% endif %}
   {% if summary %}
     <table>
       <thead>
-        <tr><th>Metric</th>{% for col in summary.keys() %}<th>{{ col }}</th>{% endfor %}</tr>
+        <tr><th>Statistic</th>{% for col in summary.keys() %}<th>{{ col }}</th>{% endfor %}</tr>
       </thead>
       <tbody>
         {% set metrics = [] %}
@@ -196,21 +299,36 @@
           <tr><th>{{ m }}</th>
             {% for col,stats in summary.items() %}
               {% set v = stats.get(m,'') %}
-              <td>{{ v }}</td>
+              <td>{{ '%.4f' % v if v is number else v }}</td>
             {% endfor %}
           </tr>
         {% endfor %}
       </tbody>
     </table>
   {% else %}
-    <p>No summary stats cached.</p>
+    <p>No statistical summary available for numeric variables.</p>
   {% endif %}
 </div>
 
 <div class="section">
-  <h2>Appendix</h2>
-  <p class="small">Raw JSON dump (trimmed) can be provided if needed. (Disabled by default).</p>
+  <h2>📋 Analysis Methodology</h2>
+  <p class="small">Technical details about the analytical methods and algorithms used in this report.</p>
+  <ul>
+    <li><strong>Value Counts:</strong> Frequency analysis of categorical variables using pandas value_counts()</li>
+    <li><strong>Correlation Analysis:</strong> Pearson correlation coefficient matrix for numeric variables</li>
+    <li><strong>PCA:</strong> Principal Component Analysis using sklearn.decomposition.PCA with standardized features</li>
+    <li><strong>K-Means:</strong> Unsupervised clustering with elbow method for optimal k selection</li>
+    <li><strong>Association Rules:</strong> Market basket analysis using Apriori algorithm (mlxtend library)</li>
+    <li><strong>AI Insights:</strong> Generated using Google Gemini model with structured prompting</li>
+  </ul>
 </div>
+
+<footer style="margin-top:40px;padding:16px;background:#f8fafc;border-radius:6px;text-align:center;">
+  <p class="small" style="margin:0;color:#64748b;">
+    Report generated by NIT 3004 H2B1 Data Analytics Platform • {{ today }}<br>
+    Automated analysis pipeline with AI-enhanced insights
+  </p>
+</footer>
 
 </body>
 </html>
