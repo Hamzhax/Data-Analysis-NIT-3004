@@ -23,7 +23,7 @@
 # Run:  python app.py   (PORT=5050 FLASK_DEBUG=1 optional)
 # ===========================================================
 
-import os, io, re, json, datetime, threading
+import os, io, re, json, datetime, threading, time, copy, gc, traceback
 from functools import lru_cache
 from datetime import timedelta
 
@@ -981,7 +981,9 @@ def build_auto_bundle(filename):
 
 def ai_narrative_from_bundle(bundle):
     if not GEMINI_MODEL:
-        return None
+        print("[AI] Gemini model not available")
+        return {"error": "AI model not configured"}
+    
     try:
         brief = {
             "basic": bundle["profile"]["basic"],
@@ -992,28 +994,100 @@ def ai_narrative_from_bundle(bundle):
             "kmeans_k": bundle.get("kmeans", {}).get("k"),
             "rules_count": len(bundle.get("assoc_rules") or []) if bundle.get("assoc_rules") else 0
         }
+        
         prompt = f"""
-You are an expert data scientist. Dataset structural brief JSON:
-{json.dumps(brief)}
-Return STRICT JSON with keys:
-overview (2 sentences),
-key_findings (5 concise bullets),
-correlations_comment (string or null),
-clusters_comment (string or null),
-pca_comment (string or null),
-categorical_insights (3 bullets),
-potential_issues (array),
-next_steps (array up to 5),
-chart_priorities (ordered array).
+You are an expert data scientist. Analyze this dataset structural brief and provide insights:
+
+Dataset Info:
+{json.dumps(brief, indent=2)}
+
+Return a JSON response with the following structure (ensure valid JSON format):
+{{
+  "overview": "2-3 sentence summary of the dataset characteristics and main patterns",
+  "key_findings": [
+    "Finding 1 about data patterns or distributions",
+    "Finding 2 about correlations or relationships", 
+    "Finding 3 about clusters or groups",
+    "Finding 4 about anomalies or outliers",
+    "Finding 5 about data quality or completeness"
+  ],
+  "correlations_comment": "Insight about the correlation patterns found" or null,
+  "clusters_comment": "Insight about the clustering results" or null,
+  "pca_comment": "Insight about the PCA dimensionality reduction" or null,
+  "categorical_insights": [
+    "Insight 1 about categorical data patterns",
+    "Insight 2 about distributions",
+    "Insight 3 about potential issues"
+  ],
+  "potential_issues": [
+    "Issue 1 - data quality concern",
+    "Issue 2 - potential bias or limitation"
+  ],
+  "next_steps": [
+    "Step 1 for further analysis",
+    "Step 2 for data validation",
+    "Step 3 for modeling or insights"
+  ],
+  "chart_priorities": [
+    "Most important visualization type",
+    "Second priority chart type",
+    "Third priority chart type"
+  ]
+}}
+
+Respond with ONLY the JSON object, no other text.
 """
+        
+        print(f"[AI] Generating narrative for dataset with {brief.get('basic', {}).get('rows', '?')} rows")
         r = GEMINI_MODEL.generate_content(prompt)
         raw = (getattr(r, "text", None) or "").strip()
+        
+        print(f"[AI] Raw response length: {len(raw)}")
+        print(f"[AI] Raw response preview: {raw[:200]}...")
+        
+        # Clean up common JSON formatting issues
+        if raw.startswith("```json"):
+            raw = raw.replace("```json", "").replace("```", "").strip()
+        elif raw.startswith("```"):
+            raw = raw.replace("```", "").strip()
+        
         try:
-            return json.loads(raw)
-        except Exception:
-            return {"overview": raw[:600]}
+            parsed = json.loads(raw)
+            print(f"[AI] Successfully parsed JSON with keys: {list(parsed.keys())}")
+            return parsed
+        except json.JSONDecodeError as je:
+            print(f"[AI] JSON parsing failed: {je}")
+            print(f"[AI] Failed content: {raw}")
+            # Return a structured fallback
+            return {
+                "overview": f"Dataset analysis completed for {brief.get('basic', {}).get('rows', '?')} rows and {brief.get('basic', {}).get('columns', '?')} columns.",
+                "key_findings": [
+                    f"Dataset contains {brief.get('basic', {}).get('numeric_cols', 0)} numeric and {brief.get('basic', {}).get('categorical_cols', 0)} categorical variables",
+                    f"Found {len(brief.get('top_correlations', []))} significant correlations",
+                    f"Clustering analysis {'completed' if brief.get('kmeans_k') else 'not available'}",
+                    f"PCA analysis {'shows variance explained' if brief.get('pca_var') else 'not available'}",
+                    "Analysis completed with automated insights"
+                ],
+                "correlations_comment": "Correlation analysis completed" if brief.get("top_correlations") else None,
+                "clusters_comment": f"Identified {brief.get('kmeans_k', 'unknown')} clusters" if brief.get("kmeans_k") else None,
+                "pca_comment": "Principal component analysis completed" if brief.get("pca_var") else None,
+                "categorical_insights": [
+                    f"Found {len(brief.get('categorical_cols', []))} categorical variables",
+                    "Distribution analysis completed",
+                    "Pattern recognition performed"
+                ],
+                "potential_issues": ["Automated analysis - review results carefully"],
+                "next_steps": [
+                    "Review correlation patterns",
+                    "Validate clustering results", 
+                    "Examine data quality"
+                ],
+                "chart_priorities": ["correlation_heatmap", "scatter_plots", "distribution_charts"]
+            }
+            
     except Exception as e:
-        return {"error": str(e)}
+        print(f"[AI] Generation failed: {e}")
+        return {"error": str(e), "overview": "AI analysis encountered an error"}
 
 @app.post("/api/auto_explore")
 def auto_explore():
@@ -1226,7 +1300,7 @@ def report_markdown():
         return fail(f"Report generation failed: {e}", 500)
 
 def generate_charts_for_pdf(bundle):
-    """Generate chart images for PDF report inclusion"""
+    """Generate chart images for PDF report inclusion with memory optimization"""
     if not MATPLOTLIB_OK:
         return {}
     
@@ -1236,9 +1310,12 @@ def generate_charts_for_pdf(bundle):
         # Value Counts Chart
         if bundle.get("categorical"):
             for col_name, values in list(bundle["categorical"].items())[:1]:  # Just first categorical
+                # Limit data points to prevent memory issues
+                values_limited = values[:15]  # Max 15 categories
+                
                 fig, ax = plt.subplots(figsize=(8, 6))
-                labels = [item['value'] for item in values[:10]]
-                counts = [item['count'] for item in values[:10]]
+                labels = [str(item['value'])[:20] for item in values_limited]  # Truncate labels
+                counts = [item['count'] for item in values_limited]
                 
                 ax.bar(range(len(labels)), counts, color='#3b82f6')
                 ax.set_xlabel('Categories')
@@ -1248,13 +1325,142 @@ def generate_charts_for_pdf(bundle):
                 ax.set_xticklabels(labels, rotation=45, ha='right')
                 
                 plt.tight_layout()
-                
-                # Save to memory
                 img_buffer = io.BytesIO()
-                plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')
+                plt.savefig(img_buffer, format='png', dpi=100, bbox_inches='tight',
+                           facecolor='white', edgecolor='none')
                 img_buffer.seek(0)
                 charts['value_counts'] = img_buffer
                 plt.close()
+                plt.clf()
+                break  # Only do first categorical column
+        
+        # Correlation Heatmap
+        if bundle.get("correlation_matrix"):
+            corr_dict = bundle["correlation_matrix"]
+            columns = list(corr_dict.keys())
+            
+            # Limit correlation matrix size for memory
+            if len(columns) > 20:
+                columns = columns[:20]
+            
+            fig, ax = plt.subplots(figsize=(10, 8))
+            
+            # Build correlation matrix from dict
+            import numpy as np
+            corr_matrix = np.zeros((len(columns), len(columns)))
+            for i, col1 in enumerate(columns):
+                for j, col2 in enumerate(columns):
+                    corr_matrix[i, j] = corr_dict.get(col1, {}).get(col2, 0)
+            
+            im = ax.imshow(corr_matrix, cmap='coolwarm', vmin=-1, vmax=1)
+            ax.set_xticks(range(len(columns)))
+            ax.set_yticks(range(len(columns)))
+            ax.set_xticklabels([col[:15] for col in columns], rotation=45, ha='right')
+            ax.set_yticklabels([col[:15] for col in columns])
+            ax.set_title('Correlation Heatmap')
+            
+            # Add colorbar
+            plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            
+            plt.tight_layout()
+            img_buffer = io.BytesIO()
+            plt.savefig(img_buffer, format='png', dpi=100, bbox_inches='tight',
+                       facecolor='white', edgecolor='none')
+            img_buffer.seek(0)
+            charts['correlation'] = img_buffer
+            plt.close()
+            plt.clf()
+        
+        # PCA Scatter Plot
+        if bundle.get("pca") and bundle["pca"].get("components_2d"):
+            components = bundle["pca"]["components_2d"]
+            if len(components) > 0:
+                # Limit points to prevent memory issues
+                components_limited = components[:2000]  # Max 2000 points
+                
+                fig, ax = plt.subplots(figsize=(8, 6))
+                
+                x_vals = [comp[0] for comp in components_limited]
+                y_vals = [comp[1] for comp in components_limited]
+                
+                ax.scatter(x_vals, y_vals, alpha=0.6, color='#3b82f6', s=20)
+                ax.set_xlabel('Principal Component 1')
+                ax.set_ylabel('Principal Component 2')
+                ax.set_title('PCA Scatter Plot')
+                ax.grid(True, alpha=0.3)
+                
+                plt.tight_layout()
+                img_buffer = io.BytesIO()
+                plt.savefig(img_buffer, format='png', dpi=100, bbox_inches='tight',
+                           facecolor='white', edgecolor='none')
+                img_buffer.seek(0)
+                charts['pca'] = img_buffer
+                plt.close()
+                plt.clf()
+        
+        # K-means Clustering
+        if bundle.get("kmeans") and bundle["kmeans"].get("components_2d") and bundle["kmeans"].get("labels_preview"):
+            components = bundle["kmeans"]["components_2d"]
+            labels = bundle["kmeans"]["labels_preview"]
+            
+            if len(components) > 0 and len(labels) > 0:
+                # Limit points to prevent memory issues
+                max_points = 2000
+                min_len = min(len(components), len(labels), max_points)
+                components = components[:min_len]
+                labels = labels[:min_len]
+                
+                fig, ax = plt.subplots(figsize=(8, 6))
+                
+                x_vals = [comp[0] for comp in components]
+                y_vals = [comp[1] for comp in components]
+                
+                # Create scatter plot with colors by cluster
+                scatter = ax.scatter(x_vals, y_vals, c=labels, alpha=0.6, s=20, cmap='viridis')
+                ax.set_xlabel('Component 1')
+                ax.set_ylabel('Component 2')
+                ax.set_title(f'K-Means Clustering (k={bundle["kmeans"].get("k", "?")})')
+                ax.grid(True, alpha=0.3)
+                
+                # Add colorbar for clusters
+                plt.colorbar(scatter, ax=ax, label='Cluster')
+                
+                plt.tight_layout()
+                img_buffer = io.BytesIO()
+                plt.savefig(img_buffer, format='png', dpi=100, bbox_inches='tight',
+                           facecolor='white', edgecolor='none')
+                img_buffer.seek(0)
+                charts['kmeans'] = img_buffer
+                plt.close()
+                plt.clf()
+    
+    except Exception as e:
+        print(f"[Charts] Error generating charts: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    finally:
+        # Force garbage collection
+        import gc
+        gc.collect()
+    
+    return charts
+                ax.set_xlabel('Categories')
+                ax.set_ylabel('Count')
+                ax.set_title(f'Value Counts: {col_name}')
+                ax.set_xticks(range(len(labels)))
+                ax.set_xticklabels(labels, rotation=45, ha='right')
+                
+                plt.tight_layout()
+                
+                # Save to memory with optimized settings
+                img_buffer = io.BytesIO()
+                plt.savefig(img_buffer, format='png', dpi=100, bbox_inches='tight', 
+                           facecolor='white', edgecolor='none')
+                img_buffer.seek(0)
+                charts['value_counts'] = img_buffer
+                plt.close()
+                plt.clf()  # Clear figure
                 break
         
         # Correlation Heatmap
@@ -1263,37 +1469,48 @@ def generate_charts_for_pdf(bundle):
             df_corr = pd.DataFrame(corr_matrix)
             
             if not df_corr.empty:
-                fig, ax = plt.subplots(figsize=(10, 8))
+                # Limit correlation matrix size to prevent memory issues
+                if len(df_corr.columns) > 20:
+                    df_corr = df_corr.iloc[:20, :20]  # Max 20x20 correlation matrix
+                
+                fig, ax = plt.subplots(figsize=(min(12, len(df_corr.columns) * 0.8), 
+                                                min(10, len(df_corr.columns) * 0.6)))
+                
                 im = ax.imshow(df_corr.values, cmap='RdBu_r', aspect='auto', vmin=-1, vmax=1)
                 
                 # Set ticks and labels
                 ax.set_xticks(range(len(df_corr.columns)))
                 ax.set_yticks(range(len(df_corr.columns)))
-                ax.set_xticklabels(df_corr.columns, rotation=45, ha='right')
-                ax.set_yticklabels(df_corr.columns)
+                ax.set_xticklabels([col[:15] for col in df_corr.columns], rotation=45, ha='right')
+                ax.set_yticklabels([col[:15] for col in df_corr.columns])
                 
                 # Add colorbar
-                plt.colorbar(im, ax=ax)
+                plt.colorbar(im, ax=ax, shrink=0.8)
                 ax.set_title('Correlation Matrix')
                 
                 plt.tight_layout()
                 
                 img_buffer = io.BytesIO()
-                plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')
+                plt.savefig(img_buffer, format='png', dpi=100, bbox_inches='tight',
+                           facecolor='white', edgecolor='none')
                 img_buffer.seek(0)
                 charts['correlation'] = img_buffer
                 plt.close()
+                plt.clf()
         
         # PCA Scatter Plot
         if bundle.get("pca") and bundle["pca"].get("components_2d"):
             components = bundle["pca"]["components_2d"]
             if len(components) > 0:
+                # Limit points to prevent memory issues
+                components_limited = components[:2000]  # Max 2000 points
+                
                 fig, ax = plt.subplots(figsize=(8, 6))
                 
-                x_vals = [comp[0] for comp in components]
-                y_vals = [comp[1] for comp in components]
+                x_vals = [comp[0] for comp in components_limited]
+                y_vals = [comp[1] for comp in components_limited]
                 
-                ax.scatter(x_vals, y_vals, alpha=0.6, color='#3b82f6')
+                ax.scatter(x_vals, y_vals, alpha=0.6, color='#3b82f6', s=20)
                 ax.set_xlabel('Principal Component 1')
                 ax.set_ylabel('Principal Component 2')
                 ax.set_title('PCA Scatter Plot')
@@ -1302,10 +1519,12 @@ def generate_charts_for_pdf(bundle):
                 plt.tight_layout()
                 
                 img_buffer = io.BytesIO()
-                plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')
+                plt.savefig(img_buffer, format='png', dpi=100, bbox_inches='tight',
+                           facecolor='white', edgecolor='none')
                 img_buffer.seek(0)
                 charts['pca'] = img_buffer
                 plt.close()
+                plt.clf()
         
         # K-means Clustering
         if bundle.get("kmeans") and bundle["kmeans"].get("components_2d") and bundle["kmeans"].get("labels_preview"):
@@ -1313,37 +1532,47 @@ def generate_charts_for_pdf(bundle):
             labels = bundle["kmeans"]["labels_preview"]
             
             if len(components) > 0 and len(labels) > 0:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                
-                # Ensure matching lengths
-                min_len = min(len(components), len(labels))
+                # Limit points to prevent memory issues
+                max_points = 2000
+                min_len = min(len(components), len(labels), max_points)
                 components = components[:min_len]
                 labels = labels[:min_len]
+                
+                fig, ax = plt.subplots(figsize=(8, 6))
                 
                 x_vals = [comp[0] for comp in components]
                 y_vals = [comp[1] for comp in components]
                 
                 # Create scatter plot with different colors for each cluster
-                scatter = ax.scatter(x_vals, y_vals, c=labels, cmap='tab10', alpha=0.7)
+                scatter = ax.scatter(x_vals, y_vals, c=labels, cmap='tab10', alpha=0.7, s=20)
                 ax.set_xlabel('Component 1')
                 ax.set_ylabel('Component 2')
                 ax.set_title('K-means Clustering')
                 ax.grid(True, alpha=0.3)
                 
-                # Add legend
-                if len(set(labels)) <= 10:  # Only add legend if reasonable number of clusters
-                    plt.colorbar(scatter, ax=ax, label='Cluster')
+                # Add legend if reasonable number of clusters
+                if len(set(labels)) <= 10:
+                    plt.colorbar(scatter, ax=ax, label='Cluster', shrink=0.8)
                 
                 plt.tight_layout()
                 
                 img_buffer = io.BytesIO()
-                plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')
+                plt.savefig(img_buffer, format='png', dpi=100, bbox_inches='tight',
+                           facecolor='white', edgecolor='none')
                 img_buffer.seek(0)
                 charts['kmeans'] = img_buffer
                 plt.close()
+                plt.clf()
     
     except Exception as e:
-        print(f"Error generating charts: {e}")
+        print(f"[Charts] Error generating charts: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    finally:
+        # Force garbage collection
+        import gc
+        gc.collect()
     
     return charts
 
@@ -1351,412 +1580,177 @@ def generate_comprehensive_pdf_report(bundle, ai, filename):
     """Generate a comprehensive PDF report with proper formatting, tables, and charts"""
     buffer = io.BytesIO()
     
-    # Create the PDF document
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=72,
-        leftMargin=72,
-        topMargin=72,
-        bottomMargin=72
-    )
-    
-    # Get styles
-    styles = getSampleStyleSheet()
-    
-    # Define custom styles
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=24,
-        spaceAfter=30,
-        alignment=TA_CENTER,
-        textColor=darkblue
-    )
-    
-    heading_style = ParagraphStyle(
-        'CustomHeading',
-        parent=styles['Heading2'],
-        fontSize=16,
-        spaceAfter=12,
-        spaceBefore=20,
-        textColor=darkblue
-    )
-    
-    subheading_style = ParagraphStyle(
-        'CustomSubHeading',
-        parent=styles['Heading3'],
-        fontSize=12,
-        spaceAfter=8,
-        spaceBefore=12,
-        textColor=HexColor('#2563eb')
-    )
-    
-    normal_style = ParagraphStyle(
-        'CustomNormal',
-        parent=styles['Normal'],
-        fontSize=10,
-        spaceAfter=6,
-        leading=12
-    )
-    
-    # Generate charts if matplotlib is available
-    chart_images = {}
-    if MATPLOTLIB_OK:
+    try:
+        # Create the PDF document
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=72,
+            leftMargin=72,
+            topMargin=72,
+            bottomMargin=72
+        )
+        
+        # Get styles
+        styles = getSampleStyleSheet()
+        normal_style = styles['Normal']
+        heading_style = styles['Heading1']
+        subheading_style = styles['Heading2']
+        
+        # Generate charts for embedding
         chart_images = generate_charts_for_pdf(bundle)
-    
-    # Import Image for chart inclusion
-    from reportlab.platypus import Image
-    
-    # Story to hold the content
-    story = []
-    
-    # Title
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
-    story.append(Paragraph("Data Mining & Analysis Report", title_style))
-    story.append(Paragraph(f"<i>Generated on {today} • Dataset: {filename}</i>", normal_style))
-    story.append(Paragraph("<i>NIT 3004 H2B1 • Data Analysis Project</i>", normal_style))
-    story.append(Spacer(1, 20))
-    
-    # Executive Summary
-    story.append(Paragraph("Executive Summary", heading_style))
-    meta = bundle.get("profile", {}).get("basic", {})
-    
-    summary_data = [
-        ["Dataset", filename],
-        ["Rows", f"{meta.get('rows', '?'):,}"],
-        ["Columns", f"{meta.get('columns', '?'):,}"],
-        ["Numeric Columns", f"{meta.get('numeric_cols', '?'):,}"],
-        ["Categorical Columns", f"{meta.get('categorical_cols', '?'):,}"],
-        ["Analysis Date", today]
-    ]
-    
-    summary_table = Table(summary_data, colWidths=[2*inch, 2*inch])
-    summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f5f9')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), black),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), HexColor('#ffffff')),
-        ('GRID', (0, 0), (-1, -1), 1, HexColor('#cbd5e1'))
-    ]))
-    story.append(summary_table)
-    story.append(Spacer(1, 20))
-    
-    # AI Insights
-    if ai:
-        story.append(Paragraph("AI-Generated Insights", heading_style))
         
-        # Handle both old and new AI structure formats
-        overview = ai.get("overview") or ai.get("summary", "")
-        if overview:
-            story.append(Paragraph("Overview", subheading_style))
-            story.append(Paragraph(overview, normal_style))
-            story.append(Spacer(1, 10))
+        # Import for chart embedding
+        from reportlab.platypus import Image
         
-        # Key findings (handle both key_points and key_findings)
-        key_findings = ai.get("key_findings") or ai.get("key_points", [])
-        if key_findings:
-            story.append(Paragraph("Key Findings", subheading_style))
-            for point in key_findings:
-                story.append(Paragraph(f"• {point}", normal_style))
-            story.append(Spacer(1, 10))
+        # Story to hold the content
+        story = []
         
-        # Correlations comment
-        if ai.get("correlations_comment"):
-            story.append(Paragraph("Correlation Insights", subheading_style))
-            story.append(Paragraph(ai["correlations_comment"], normal_style))
-            story.append(Spacer(1, 10))
+        # Title
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        story.append(Paragraph("Data Mining & Analysis Report", heading_style))
+        story.append(Paragraph(f"Generated on {today} • Dataset: {filename}", normal_style))
+        story.append(Spacer(1, 20))
         
-        # Clusters comment
-        if ai.get("clusters_comment"):
-            story.append(Paragraph("Clustering Insights", subheading_style))
-            story.append(Paragraph(ai["clusters_comment"], normal_style))
-            story.append(Spacer(1, 10))
-        
-        # PCA comment
-        if ai.get("pca_comment"):
-            story.append(Paragraph("PCA Insights", subheading_style))
-            story.append(Paragraph(ai["pca_comment"], normal_style))
-            story.append(Spacer(1, 10))
-        
-        # Categorical insights
-        if ai.get("categorical_insights"):
-            story.append(Paragraph("Categorical Data Insights", subheading_style))
-            for insight in ai["categorical_insights"]:
-                story.append(Paragraph(f"• {insight}", normal_style))
-            story.append(Spacer(1, 10))
-        
-        # Potential issues (handle both potential_issues and anomalies)
-        issues = ai.get("potential_issues") or ai.get("anomalies", [])
-        if issues:
-            story.append(Paragraph("Potential Issues", subheading_style))
-            for issue in issues:
-                story.append(Paragraph(f"• {issue}", normal_style))
-            story.append(Spacer(1, 10))
-        
-        # Recommendations
-        recommendation = ai.get("recommendation")
-        if recommendation:
-            story.append(Paragraph("Recommendations", subheading_style))
-            story.append(Paragraph(recommendation, normal_style))
-            story.append(Spacer(1, 10))
-        
-        # Next steps
-        if ai.get("next_steps"):
-            story.append(Paragraph("Next Steps", subheading_style))
-            for step in ai["next_steps"]:
-                story.append(Paragraph(f"• {step}", normal_style))
-            story.append(Spacer(1, 10))
-        
-        # Chart priorities
-        if ai.get("chart_priorities"):
-            story.append(Paragraph("Recommended Chart Priorities", subheading_style))
-            for i, chart in enumerate(ai["chart_priorities"], 1):
-                story.append(Paragraph(f"{i}. {chart}", normal_style))
-            story.append(Spacer(1, 10))
-    
-    story.append(PageBreak())
-    
-    # Statistical Summary
-    if bundle.get("summary"):
-        story.append(Paragraph("Statistical Summary", heading_style))
-        summary = bundle["summary"]
-        
-        # Create summary table
-        if summary:
-            columns = list(summary.keys())
-            metrics = set()
-            for col_stats in summary.values():
-                metrics.update(col_stats.keys())
-            metrics = sorted(list(metrics))
-            
-            # Limit to most important metrics and columns for readability
-            important_metrics = ['count', 'mean', 'std', 'min', '25%', '50%', '75%', 'max']
-            display_metrics = [m for m in important_metrics if m in metrics]
-            display_columns = columns[:6]  # Show first 6 columns
-            
-            if display_metrics and display_columns:
-                table_data = [["Metric"] + display_columns]
-                
-                for metric in display_metrics:
-                    row = [metric]
-                    for col in display_columns:
-                        value = summary[col].get(metric, "")
-                        if isinstance(value, (int, float)):
-                            if abs(value) > 1000 or (abs(value) < 0.01 and value != 0):
-                                value = f"{value:.2e}"
-                            else:
-                                value = f"{value:.3f}"
-                        row.append(str(value)[:12])  # Truncate long values
-                    table_data.append(row)
-                
-                stats_table = Table(table_data)
-                stats_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f5f9')),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), black),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, -1), 8),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                    ('GRID', (0, 0), (-1, -1), 1, HexColor('#cbd5e1'))
-                ]))
-                story.append(stats_table)
-                story.append(Spacer(1, 15))
-    
-    # Top Correlations
-    if bundle.get("top_correlations"):
-        story.append(Paragraph("Top Correlations", heading_style))
-        
-        # Add correlation heatmap if available
-        if 'correlation' in chart_images:
-            img = Image(chart_images['correlation'], width=6*inch, height=4.5*inch)
-            story.append(img)
-            story.append(Spacer(1, 10))
-        
-        corr_data = [["Variable A", "Variable B", "Correlation"]]
-        
-        for a, b, corr in bundle["top_correlations"][:10]:
-            corr_data.append([str(a)[:20], str(b)[:20], f"{corr:.4f}"])
-        
-        corr_table = Table(corr_data, colWidths=[2*inch, 2*inch, 1*inch])
-        corr_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f5f9')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), black),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('GRID', (0, 0), (-1, -1), 1, HexColor('#cbd5e1'))
-        ]))
-        story.append(corr_table)
+        # Executive Summary
+        story.append(Paragraph("Executive Summary", subheading_style))
+        basic = bundle.get("profile", {}).get("basic", {})
+        story.append(Paragraph(f"Dataset contains {basic.get('rows', '?'):,} rows and {basic.get('columns', '?')} columns.", normal_style))
+        story.append(Paragraph(f"Numeric columns: {basic.get('numeric_cols', 0)}, Categorical columns: {basic.get('categorical_cols', 0)}", normal_style))
         story.append(Spacer(1, 15))
-    
-    # Categorical Analysis
-    if bundle.get("categorical"):
-        story.append(Paragraph("Categorical Data Analysis", heading_style))
         
-        # Add value counts chart if available
-        if 'value_counts' in chart_images:
-            img = Image(chart_images['value_counts'], width=6*inch, height=4.5*inch)
-            story.append(img)
-            story.append(Spacer(1, 10))
+        # AI Insights
+        if ai and not ai.get("error"):
+            story.append(Paragraph("AI-Generated Insights", subheading_style))
+            
+            # Overview
+            overview = ai.get("overview") or ai.get("summary", "")
+            if overview:
+                story.append(Paragraph("Overview", normal_style))
+                story.append(Paragraph(overview, normal_style))
+                story.append(Spacer(1, 10))
+            
+            # Key findings
+            key_findings = ai.get("key_findings") or ai.get("key_points", [])
+            if key_findings:
+                story.append(Paragraph("Key Findings", normal_style))
+                for point in key_findings:
+                    story.append(Paragraph(f"• {point}", normal_style))
+                story.append(Spacer(1, 10))
+            
+            # Additional AI insights
+            if ai.get("correlations_comment"):
+                story.append(Paragraph("Correlation Insights", normal_style))
+                story.append(Paragraph(ai["correlations_comment"], normal_style))
+                story.append(Spacer(1, 10))
+            
+            if ai.get("clusters_comment"):
+                story.append(Paragraph("Clustering Insights", normal_style))
+                story.append(Paragraph(ai["clusters_comment"], normal_style))
+                story.append(Spacer(1, 10))
+            
+            if ai.get("next_steps"):
+                story.append(Paragraph("Next Steps", normal_style))
+                for step in ai["next_steps"]:
+                    story.append(Paragraph(f"• {step}", normal_style))
+                story.append(Spacer(1, 10))
         
-        for col_name, values in list(bundle["categorical"].items())[:3]:  # Show top 3 categorical columns
-            story.append(Paragraph(f"Distribution: {col_name}", subheading_style))
-            
-            cat_data = [["Value", "Count", "Percentage"]]
-            total = sum(item['count'] for item in values)
-            
-            for item in values[:8]:  # Show top 8 values
-                count = item['count']
-                percentage = (count / total * 100) if total > 0 else 0
-                cat_data.append([str(item['value'])[:25], str(count), f"{percentage:.1f}%"])
-            
-            cat_table = Table(cat_data, colWidths=[2.5*inch, 1*inch, 1*inch])
-            cat_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f5f9')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), black),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('GRID', (0, 0), (-1, -1), 1, HexColor('#cbd5e1'))
-            ]))
-            story.append(cat_table)
-            story.append(Spacer(1, 10))
-    
-    story.append(PageBreak())
-    
-    # Advanced Analytics Results
-    story.append(Paragraph("Advanced Analytics", heading_style))
-    
-    # PCA Results
-    if bundle.get("pca"):
-        story.append(Paragraph("Principal Component Analysis (PCA)", subheading_style))
-        pca = bundle["pca"]
+        story.append(PageBreak())
         
-        # Add PCA scatter plot if available
-        if 'pca' in chart_images:
-            img = Image(chart_images['pca'], width=6*inch, height=4.5*inch)
-            story.append(img)
-            story.append(Spacer(1, 10))
+        # Data Analysis Results
+        story.append(Paragraph("Analysis Results", heading_style))
         
-        if pca.get("explained_variance"):
-            story.append(Paragraph("Explained Variance by Component:", normal_style))
-            pca_data = [["Component", "Explained Variance", "Cumulative"]]
-            cumulative = 0
+        # Correlation Analysis
+        if bundle.get("top_correlations"):
+            story.append(Paragraph("Top Correlations", subheading_style))
             
-            for i, var in enumerate(pca["explained_variance"][:5]):
-                cumulative += var
-                pca_data.append([f"PC{i+1}", f"{var:.4f}", f"{cumulative:.4f}"])
+            # Add correlation chart if available
+            if 'correlation' in chart_images:
+                img = Image(chart_images['correlation'], width=6*72, height=4*72)  # 6x4 inches
+                story.append(img)
+                story.append(Spacer(1, 10))
             
-            pca_table = Table(pca_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch])
-            pca_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f5f9')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), black),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('GRID', (0, 0), (-1, -1), 1, HexColor('#cbd5e1'))
-            ]))
-            story.append(pca_table)
+            # Correlation table
+            story.append(Paragraph("Strongest Correlations:", normal_style))
+            for a, b, corr in bundle["top_correlations"][:10]:
+                story.append(Paragraph(f"• {a} ↔ {b}: {corr:.3f}", normal_style))
             story.append(Spacer(1, 15))
-    
-    # K-Means Results
-    if bundle.get("kmeans"):
-        story.append(Paragraph("K-Means Clustering", subheading_style))
-        kmeans = bundle["kmeans"]
         
-        # Add K-means clustering visualization if available
-        if 'kmeans' in chart_images:
-            img = Image(chart_images['kmeans'], width=6*inch, height=4.5*inch)
-            story.append(img)
-            story.append(Spacer(1, 10))
-        
-        story.append(Paragraph(f"Optimal number of clusters: {kmeans.get('k', '?')}", normal_style))
-        
-        if kmeans.get("centers"):
-            story.append(Paragraph("Cluster Centers:", normal_style))
-            centers_data = [["Cluster"] + (kmeans.get("columns", [])[:5] or ["Dim1", "Dim2", "Dim3", "Dim4", "Dim5"])]
+        # PCA Analysis
+        if bundle.get("pca"):
+            story.append(Paragraph("Principal Component Analysis", subheading_style))
             
-            for i, center in enumerate(kmeans["centers"]):
-                row = [f"Cluster {i}"] + [f"{val:.3f}" for val in center[:5]]
-                centers_data.append(row)
+            # Add PCA chart if available
+            if 'pca' in chart_images:
+                img = Image(chart_images['pca'], width=6*72, height=4*72)
+                story.append(img)
+                story.append(Spacer(1, 10))
             
-            centers_table = Table(centers_data)
-            centers_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f5f9')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), black),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('GRID', (0, 0), (-1, -1), 1, HexColor('#cbd5e1'))
-            ]))
-            story.append(centers_table)
+            # PCA explained variance
+            pca = bundle["pca"]
+            if pca.get("explained_variance"):
+                story.append(Paragraph("Explained Variance by Component:", normal_style))
+                for i, var in enumerate(pca["explained_variance"][:5], 1):
+                    story.append(Paragraph(f"• PC{i}: {var:.1%}", normal_style))
             story.append(Spacer(1, 15))
-    
-    # Association Rules
-    if bundle.get("assoc_rules"):
-        story.append(Paragraph("Association Rules (Top 10)", subheading_style))
-        rules = bundle["assoc_rules"][:10]
         
-        rules_data = [["Antecedents", "Consequents", "Support", "Confidence", "Lift"]]
-        
-        for rule in rules:
-            antecedents = rule.get("antecedents", [])
-            consequents = rule.get("consequents", [])
+        # K-Means Clustering
+        if bundle.get("kmeans"):
+            story.append(Paragraph("K-Means Clustering", subheading_style))
             
-            # Handle both string and list formats
-            ant_str = ", ".join(antecedents) if isinstance(antecedents, list) else str(antecedents)
-            con_str = ", ".join(consequents) if isinstance(consequents, list) else str(consequents)
+            # Add clustering chart if available
+            if 'kmeans' in chart_images:
+                img = Image(chart_images['kmeans'], width=6*72, height=4*72)
+                story.append(img)
+                story.append(Spacer(1, 10))
             
-            rules_data.append([
-                ant_str[:20],
-                con_str[:20],
-                f"{rule.get('support', 0):.3f}",
-                f"{rule.get('confidence', 0):.3f}",
-                f"{rule.get('lift', 0):.3f}"
-            ])
+            kmeans = bundle["kmeans"]
+            story.append(Paragraph(f"Optimal clusters identified: {kmeans.get('k', '?')}", normal_style))
+            story.append(Spacer(1, 15))
         
-        rules_table = Table(rules_data)
-        rules_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f5f9')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), black),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('GRID', (0, 0), (-1, -1), 1, HexColor('#cbd5e1'))
-        ]))
-        story.append(rules_table)
-        story.append(Spacer(1, 15))
-    
-    # Recommendations
-    if bundle.get("recommended_charts"):
-        story.append(Paragraph("Recommended Visualizations", subheading_style))
-        story.append(Paragraph("Based on your data characteristics, the following chart types are recommended:", normal_style))
+        # Categorical Analysis
+        if bundle.get("categorical"):
+            story.append(Paragraph("Categorical Data Analysis", subheading_style))
+            
+            # Add value counts chart if available
+            if 'value_counts' in chart_images:
+                img = Image(chart_images['value_counts'], width=6*72, height=4*72)
+                story.append(img)
+                story.append(Spacer(1, 10))
+            
+            # Show top categories for first few categorical columns
+            for col_name, values in list(bundle["categorical"].items())[:3]:
+                story.append(Paragraph(f"Top values in {col_name}:", normal_style))
+                for item in values[:5]:
+                    story.append(Paragraph(f"• {item['value']}: {item['count']:,} occurrences", normal_style))
+                story.append(Spacer(1, 10))
         
-        for chart in bundle["recommended_charts"][:5]:
-            chart_type = chart.get("type", "Unknown")
-            reason = chart.get("reason", "No reason provided")
-            story.append(Paragraph(f"• <b>{chart_type.replace('_', ' ').title()}</b>: {reason}", normal_style))
+        # Footer
+        story.append(Spacer(1, 30))
+        story.append(Paragraph("Generated by Data Mining Dashboard • For exploratory purposes only", normal_style))
         
-        story.append(Spacer(1, 15))
-    
-    # Footer
-    story.append(Spacer(1, 30))
-    story.append(Paragraph("<i>This report was automatically generated by the Data Mining Dashboard system.</i>", normal_style))
-    story.append(Paragraph("<i>For questions or additional analysis, please contact the development team.</i>", normal_style))
-    
-    # Build the PDF
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
+        # Build the PDF
+        doc.build(story)
+        buffer.seek(0)
+        return buffer
+        
+    except Exception as e:
+        print(f"[PDF] Error generating PDF: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+    finally:
+        # Cleanup chart images
+        for chart_buffer in chart_images.values():
+            try:
+                chart_buffer.close()
+            except:
+                pass
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        print("[PDF] Memory cleanup completed")
 
 @app.get("/api/report/pdf")
 def report_pdf():

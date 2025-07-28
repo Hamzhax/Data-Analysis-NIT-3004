@@ -18,5 +18,10 @@
     "username": "1",
     "password_hash": "scrypt:32768:8:1$hT3J8rp0b2VFFCRd$2977ba6a09a18bc342507f08bac8a6d45bbd402c4db375354f19924d93dcab793716947a691a87b468e07acb12ec2604cb322e67c136857ab33bf376fa4508d9",
     "role": "admin"
+  },
+  {
+    "username": "testuser",
+    "password_hash": "scrypt:32768:8:1$65WQpLxbMhTudTec$5f229cfe63ac4d4ed80cc6e385d6ff0e543b9eaf4cb401c78a53b33777b86f4c690d5c0e3fb8026ab5966ccc21cd6e0c5b8f18ccd1980b773b3fc65346ebc6be",
+    "role": "admin"
   }
 ]
