@@ -867,3 +867,15 @@ async function inferColumnTypes() {
     if (res.types) lsSet("colTypesCache", res.types);
   } catch (e) {}
 }
+
+function renderOverview() {
+  // TODO: Implement overview rendering logic
+  const box = document.getElementById("overview-meta");
+  if (box) box.innerHTML = "<p class='text-dim'>Overview not implemented yet.</p>";
+}
+
+function renderAINarrative() {
+  // TODO: Implement AI narrative rendering logic
+  const box = document.getElementById("ai-narrative-box");
+  if (box) box.innerHTML = "<p class='text-dim'>AI Narrative not implemented yet.</p>";
+}
