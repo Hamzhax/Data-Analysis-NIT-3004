@@ -315,16 +315,21 @@ async function buildAISnippet(maxRows=20){
   const bundle=lsGet("autoBundle");
   const file=localStorage.getItem("filename");
   let preview=null;
+  let genericDesc = "";
   try{
     const res=await handleApi("/api/preview_json",{method:"POST",body:{filename:file}});
     preview={columns:res.columns,rows:(res.rows||[]).slice(0,maxRows)};
+    if (res.columns && res.rows) {
+      genericDesc = `This dataset contains ${res.rows.length} rows and ${res.columns.length} columns. The columns are: ${res.columns.join(", ")}.`;
+    }
   }catch(_){}
   return {
     meta: bundle?.profile?.basic || {},
     top_corr: (bundle?.top_correlations||[]).slice(0,8),
     value_counts: bundle?.categorical ? Object.fromEntries(Object.entries(bundle.categorical).slice(0,2)) : null,
     summary_stats: bundle?.summary ? Object.fromEntries(Object.entries(bundle.summary).slice(0,6)) : null,
-    preview
+    preview,
+    genericDesc
   };
 }
 const stripFences = str => typeof str==="string"
@@ -370,15 +375,19 @@ async function generateAISummary(){
   out&&(out.innerHTML="<em>Generating...</em>"); st&&(st.textContent="…");
   try{
     const snippet=await buildAISnippet(20);
+    // Always prepend a generic paragraph about the data
+    let generic = snippet.genericDesc || "This dataset contains tabular data.";
     const richDesc = `
 DATA BRIEF (JSON):
 ${JSON.stringify(snippet)}
+
+GENERIC DATA DESCRIPTION: ${generic}
 
 USER CONTEXT: ${chartType}
 USER PROMPT: ${description}
 
 TASK: Act as a senior data analyst. Using ONLY the data above, provide:
-- 2 sentence high-level summary
+- 2 sentence high-level summary (start with a generic description if possible)
 - 4–6 concise bullet key findings (use numbers/columns)
 - Any notable anomalies/outliers (array)
 - 1 actionable recommendation
@@ -427,12 +436,18 @@ Return STRICT JSON with keys exactly:
 /* ---------------- Auto Explore ---------------- */
 async function autoExplore(){
   const prog=$("auto-explore-progress")||$("viz-auto-status");
+  if (window._autoExploreRunning) return; // Prevent double run
+  window._autoExploreRunning = true;
   prog&&(prog.textContent="Running auto exploration...");
   try{
     const res=await handleApi("/api/auto_explore",{method:"POST"});
     storeAutoBundle(res);
     prog&&(prog.textContent="Complete ✓");
-    toast("Auto Explore complete","success");
+    if (!window._autoExploreToastShown) {
+      toast("Auto Explore complete","success");
+      window._autoExploreToastShown = true;
+      setTimeout(()=>{window._autoExploreToastShown=false;}, 2000);
+    }
     inferColumnTypes();
     if(document.body.getAttribute("data-page")==="visualization"){
       ensureCorrelation(); renderOverview(); renderAINarrative(); syncExportButtons();
@@ -440,6 +455,8 @@ async function autoExplore(){
   }catch(e){
     prog&&(prog.textContent="Error");
     toast("Auto explore failed: "+e.message,"error");
+  } finally {
+    window._autoExploreRunning = false;
   }
 }
 function storeAutoBundle(result){
@@ -507,7 +524,23 @@ async function downloadPdfReport(){
     const res=await fetch(`${BASE_URL}/api/report/pdf`,{credentials:"include"});
     if(!res.ok) throw new Error("PDF failed");
     const blob=await res.blob();
-    downloadBlob(blob,"dataset_report.pdf");
+    // Prevent double download by removing any previous download links
+    if (window._pdfDownloadLink) {
+      document.body.removeChild(window._pdfDownloadLink);
+      window._pdfDownloadLink = null;
+    }
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob); a.download="dataset_report.pdf";
+    document.body.appendChild(a);
+    window._pdfDownloadLink = a;
+    a.click();
+    setTimeout(()=>{
+      URL.revokeObjectURL(a.href);
+      if (window._pdfDownloadLink) {
+        document.body.removeChild(window._pdfDownloadLink);
+        window._pdfDownloadLink = null;
+      }
+    },1500);
     st&&(st.textContent="PDF ready");
     toast("PDF ready","success");
   }catch(e){ st&&(st.textContent="Error"); toast("PDF error: "+e.message,"error"); }
@@ -809,7 +842,7 @@ function renderPCA(){
   console.log("PCA data:", pca); // Debug output
   
   const comps=pca?.components_2d || pca?.components;
-  if(!comps || !comps.length){ 
+  if(!pca || !comps || !Array.isArray(comps) || comps.length === 0){ 
     box.innerHTML="<p class='text-small text-dim'>No PCA data. Run PCA analysis or Auto Explore with ≥2 numeric columns.</p>"; 
     return; 
   }
