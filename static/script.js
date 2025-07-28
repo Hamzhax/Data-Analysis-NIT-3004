@@ -857,3 +857,13 @@ function renderKMeans(){
   });
   syncExportButtons();
 }
+
+/* ---------------- Column Type Inference ---------------- */
+async function inferColumnTypes() {
+  const file = localStorage.getItem("filename");
+  if (!file) return;
+  try {
+    const res = await handleApi("/api/coltypes");
+    if (res.types) lsSet("colTypesCache", res.types);
+  } catch (e) {}
+}
