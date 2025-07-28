@@ -787,14 +787,26 @@ If information insufficient, still produce generic safe suggestions.
 
 # ---------- AUTO EXPLORE ----------
 def build_auto_bundle(filename):
-    df     = load_df(filename)
+    # Load the full DataFrame for preview/meta, but sample for heavy analysis
+    df_full = load_df(filename)
+    MAX_ROWS = 10000
+
+    # Use a sample for all heavy analysis
+    if df_full.shape[0] > MAX_ROWS:
+        df = df_full.sample(n=MAX_ROWS, random_state=42)
+    else:
+        df = df_full
+
     num_df = df.select_dtypes(include="number")
     cat_df = df.select_dtypes(exclude="number")
 
+    # Summary: use the sample (fast, but still representative)
     summary = safe_describe(df)
 
+    # Categorical info
     categorical_info = {c: top_cats(cat_df[c], top=8) for c in cat_df.columns}
-    numeric_info     = {}
+    # Numeric info
+    numeric_info = {}
     for c in num_df.columns:
         numeric_info[c] = {
             "min":  float(num_df[c].min())  if not num_df[c].empty else None,
@@ -804,17 +816,16 @@ def build_auto_bundle(filename):
             "hist": compress_hist(num_df[c])
         }
 
-    top_correlations  = []
+    # Correlation
+    top_correlations = []
     correlation_matrix = None
     truncated = False
     kept_cols = []
     original_side = None
-
     if num_df.shape[1] >= 2:
         corr_full = num_df.corr().fillna(0)
         corr_small, truncated, kept_cols, original_side = maybe_truncate_correlation(corr_full)
         correlation_matrix = corr_small.to_dict()
-
         pairs = []
         cols = corr_full.columns
         for i in range(len(cols)):
@@ -823,41 +834,50 @@ def build_auto_bundle(filename):
         pairs.sort(key=lambda x: abs(x[2]), reverse=True)
         top_correlations = pairs[:15]
 
+    # PCA
     pca_result = None
     if num_df.shape[1] >= 2 and num_df.dropna().shape[0] > 5:
         nd = num_df.dropna()
         ncomp = min(3, nd.shape[1])
-        pca = PCA(n_components=ncomp, random_state=42)
-        comps = pca.fit_transform(nd)
-        pca_result = {
-            "explained_variance": pca.explained_variance_ratio_.tolist(),
-            "components_2d": [[float(a), float(b)] for a, b in comps[:300, :2]]
-        }
+        try:
+            pca = PCA(n_components=ncomp, random_state=42)
+            comps = pca.fit_transform(nd)
+            pca_result = {
+                "explained_variance": pca.explained_variance_ratio_.tolist(),
+                "components_2d": [[float(a), float(b)] for a, b in comps[:300, :2]]
+            }
+        except Exception:
+            pca_result = None
 
+    # KMeans
     kmeans_result = None
     if num_df.shape[1] >= 2 and num_df.dropna().shape[0] >= 30:
         nd = num_df.dropna()
         max_k = min(6, max(3, nd.shape[0] // 8))
         inertias, models = [], []
-        for k in range(2, max_k + 1):
-            km = KMeans(n_clusters=k, n_init="auto", random_state=42)
-            km.fit(nd)
-            inertias.append(km.inertia_)
-            models.append(km)
-        drops = []
-        for i in range(1, len(inertias)):
-            prev = inertias[i - 1]; cur = inertias[i]
-            drop = (prev - cur) / prev if prev else 0
-            drops.append((i + 2, drop))
-        if drops:
-            best_k = max(drops, key=lambda x: x[1])[0]
-            best_model = models[best_k - 2]
-            kmeans_result = {
-                "k": best_k,
-                "centers": best_model.cluster_centers_.tolist(),
-                "labels_preview": best_model.labels_[:300].tolist()
-            }
+        try:
+            for k in range(2, max_k + 1):
+                km = KMeans(n_clusters=k, n_init="auto", random_state=42)
+                km.fit(nd)
+                inertias.append(km.inertia_)
+                models.append(km)
+            drops = []
+            for i in range(1, len(inertias)):
+                prev = inertias[i - 1]; cur = inertias[i]
+                drop = (prev - cur) / prev if prev else 0
+                drops.append((i + 2, drop))
+            if drops:
+                best_k = max(drops, key=lambda x: x[1])[0]
+                best_model = models[best_k - 2]
+                kmeans_result = {
+                    "k": best_k,
+                    "centers": best_model.cluster_centers_.tolist(),
+                    "labels_preview": best_model.labels_[:300].tolist()
+                }
+        except Exception:
+            kmeans_result = None
 
+    # Association Rules
     assoc_result = None
     if MLXTEND_AVAILABLE:
         cats = cat_df.fillna("MISSING")
@@ -870,9 +890,7 @@ def build_auto_bundle(filename):
                     rules = association_rules(freq, metric="confidence", min_threshold=0.6)
                     if not rules.empty:
                         top = rules.sort_values("lift", ascending=False).head(15)
-
                         def fs(x): return list(x) if isinstance(x, frozenset) else x
-
                         assoc_result = []
                         for _, r in top.iterrows():
                             assoc_result.append({
@@ -883,8 +901,9 @@ def build_auto_bundle(filename):
                                 "lift": float(r["lift"])
                             })
             except Exception:
-                pass
+                assoc_result = None
 
+    # Recommended charts
     rec_charts = []
     if numeric_info:       rec_charts.append({"type": "histogram",            "reason": "Distribution"})
     if correlation_matrix: rec_charts.append({"type": "correlation_heatmap",  "reason": "Relationships"})
@@ -895,11 +914,12 @@ def build_auto_bundle(filename):
         for f in first:
             rec_charts.append({"type": "bar", "column": f, "reason": "Category freq"})
 
+    # Use full df for meta, but all analysis is on sample
     basic = {
-        "rows": int(df.shape[0]),
-        "columns": int(df.shape[1]),
-        "numeric_cols": int(num_df.shape[1]),
-        "categorical_cols": int(cat_df.shape[1])
+        "rows": int(df_full.shape[0]),
+        "columns": int(df_full.shape[1]),
+        "numeric_cols": int(df_full.select_dtypes(include="number").shape[1]),
+        "categorical_cols": int(df_full.select_dtypes(exclude="number").shape[1])
     }
 
     return {
