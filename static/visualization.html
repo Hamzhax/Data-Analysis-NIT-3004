@@ -394,15 +394,72 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     const st=$("viz-auto-status"); st.textContent="Running...";
     try{ await autoExplore(); st.textContent="Done ✓"; ensureCorrelation?.(); renderAINarrative?.(); }
     catch(err){ st.textContent="Error"; toast(err.message,"error"); }
-  });
 
-  bind("btn-refresh-meta", loadMeta);
-  bind("viz-refresh-meta-2", loadMeta);
+    <!-- Controls -->
+    <aside class="panel" id="controls-panel" aria-label="Visualization Controls">
+      <fieldset>
+        <div id="qi-output" class="ai-box mt-sm" style="min-height:110px;font-size:.63rem;"></div>
+      </fieldset>
+      <fieldset>
+        <legend>Session</legend>
+        <div class="inline">
+          <button class="btn-danger btn-small" id="viz-clear-cache" type="button">Clear Cache</button>
+          <button class="btn-outline btn-small" id="viz-refresh-meta-2" type="button">Reload Meta</button>
+        </div>
+        <p class="text-small text-dim mt-sm mb0">Clears local analysis bundle.</p>
+      </fieldset>
+    </aside>
 
-  const clear=()=>{ clearAnalysis?.(); ensureCorrelation?.(); renderValueCounts?.(); renderAINarrative?.(); };
-  bind("viz-clear-cache", clear);
-  bind("btn-clear-cache", clear);
-
+    <!-- Results -->
+    <section class="panel" id="results-panel" aria-label="Results">
+      <div class="panel-header">
+        <h2 class="panel-title">Results & Insights</h2>
+        <span class="badge">INSIGHTS</span>
+      </div>
+      <div class="viz-tabs" id="viz-tabs" role="tablist">
+        <button class="tab active" data-tab="overview" role="tab" aria-selected="true">Overview</button>
+        <button class="tab" data-tab="value_counts" role="tab">Value Counts</button>
+        <button class="tab" data-tab="correlation" role="tab">Correlation</button>
+        <button class="tab" data-tab="pca" role="tab">PCA</button>
+        <button class="tab" data-tab="kmeans" role="tab">KMeans</button>
+        <button class="tab" data-tab="assoc" role="tab">Assoc Rules</button>
+        <button class="tab" data-tab="summary" role="tab">Summary</button>
+        <button class="tab" data-tab="ai" role="tab">AI Insights</button>
+      </div>
+      <div class="viz-section active" id="sec-overview">
+        <h3>Overview</h3>
+        <div id="overview-meta"></div>
+      </div>
+      <div class="viz-section" id="sec-value_counts">
+        <h3>Value Counts</h3>
+        <div id="vc-box"></div>
+      </div>
+      <div class="viz-section" id="sec-correlation">
+        <h3>Correlation</h3>
+        <div id="corr-wrap"></div>
+      </div>
+      <div class="viz-section" id="sec-pca">
+        <h3>PCA</h3>
+        <div id="pca-box"></div>
+      </div>
+      <div class="viz-section" id="sec-kmeans">
+        <h3>KMeans</h3>
+        <div id="kmeans-box"></div>
+      </div>
+      <div class="viz-section" id="sec-assoc">
+        <h3>Association Rules</h3>
+        <div id="assoc-box"></div>
+      </div>
+      <div class="viz-section" id="sec-summary">
+        <h3>Summary Statistics</h3>
+        <div id="summary-box"></div>
+      </div>
+      <div class="viz-section" id="sec-ai">
+        <h3>AI Narrative</h3>
+        <div id="ai-narrative-box"></div>
+      </div>
+    </section>
+  </div>
   $("corr-scale")?.addEventListener("change", ()=>{
     if($("#sec-correlation").classList.contains("active")) renderCorrTable?.();
   });

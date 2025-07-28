@@ -34,7 +34,7 @@ if (!BASE_URL) {
   } else {
     BASE_URL = "http://127.0.0.1:5050"; // local dev
   }
-}
+// End of renderPCA
 window.BASE_URL = BASE_URL;
 
 const LS_KEYS_TO_CLEAR = [
@@ -49,80 +49,100 @@ const lsDel  = k => localStorage.removeItem(k);
 
 /* ---------------- Toast ---------------- */
 function toast(msg,type="info",timeout=3000){
-  let wrap=$("toast-wrap");
-  if(!wrap){
-    wrap=document.createElement("div");
-    wrap.id="toast-wrap";
-    wrap.style.cssText="position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:.5rem;align-items:flex-end;";
-    document.body.appendChild(wrap);
+
+function renderPCA() {
+  const pca = lsGet("pca") || lsGet("autoBundle")?.pca;
+  const km = lsGet("kmeans") || lsGet("autoBundle")?.kmeans;
+  const box = $("pca-box") || $("pca-container");
+  if (!box) return;
+  const comps = pca?.components_2d || pca?.components;
+  if (!comps || !Array.isArray(comps) || comps.length === 0) {
+    box.innerHTML = "<p class='text-small text-dim'>No PCA data.</p>";
+    return;
   }
-  const icons = {
-    error: "⛔️", success: "✅", warn: "⚠️", info: "ℹ️"
-  };
-  const card=document.createElement("div");
-  card.innerHTML = `<span style="margin-right:.5em">${icons[type]||""}</span>${msg}`;
-  card.style.cssText=`
-    font:500 .7rem/1.35 Inter,system-ui,sans-serif;
-    background:${type==="error"?"#3b1217":type==="success"?"#123b2a":type==="warn"?"#3b2f12":"#162235"};
-    border:1px solid ${type==="error"?"#ef4444":type==="success"?"#10b981":type==="warn"?"#f59e0b":"#2c425a"};
-    color:#e2e8f0;padding:.55rem .75rem;border-radius:10px;
-    box-shadow:0 4px 20px -6px rgba(0,0,0,.55);
-    backdrop-filter:blur(6px);opacity:0;transform:translateY(6px);
-    transition:opacity .35s,transform .35s;`;
-  wrap.appendChild(card);
-  requestAnimationFrame(()=>{card.style.opacity=1;card.style.transform="translateY(0)";});
-  setTimeout(()=>{card.style.opacity=0;card.style.transform="translateY(6px)";setTimeout(()=>wrap.removeChild(card),350);},timeout);
-}
 
-/* ---------------- Fetch wrapper ---------------- */
-async function handleApi(path,opts={}){
-  const init={
-    method:(opts.method||"GET").toUpperCase(),
-    credentials:"include",
-    headers:{"Content-Type":"application/json",...(opts.headers||{})}
-  };
-  if(opts.body) init.body=typeof opts.body==="string"?opts.body:JSON.stringify(opts.body);
-  const res=await fetch(BASE_URL+path,init);
-  let js={};
-  try{ js=await res.json(); }catch{}
-  if(!res.ok || js.status==="error") throw new Error(js.error||`HTTP ${res.status}`);
-  return js;
-}
+  // Find min/max for scaling
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  comps.forEach(([x, y]) => {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  });
+  // Add 5% padding
+  const padX = (maxX - minX) * 0.05;
+  const padY = (maxY - minY) * 0.05;
+  minX -= padX; maxX += padX; minY -= padY; maxY += padY;
 
-/* ---------------- Auth ---------------- */
-async function logout(){
-  try{await handleApi("/api/logout",{method:"POST"});}catch{}
-  localStorage.clear(); window.location.href="login.html";
-}
-async function ensureAuthForProtectedPages(){
-  const pages=["dashboard","analysis","visualization","admin","upload","preview"];
-  const page=document.body.getAttribute("data-page");
-  if(!pages.includes(page)) return;
-  try{
-    const me=await handleApi("/api/me");
-    lsSet("currentUser",me.user); lsSet("role",me.role);
-    if(me.role!=="admin"){
-      document.querySelectorAll(".admin-link, a[href='admin.html']").forEach(a=>a.style.display="none");
+  // Try to color by cluster if available
+  const labels = km?.labels_preview || km?.labels || [];
+  const hasClusters = labels.length === comps.length;
+  const colors = ["#02b2ff", "#b136ff", "#ffb86c", "#10b981", "#ef4444", "#f59e42", "#7a4bff", "#ff7a7a"];
+  const datasets = hasClusters
+    ? [...new Set(labels)].map((cl, idx) => ({
+        label: "Cluster " + cl,
+        data: comps.map((p, i) => labels[i] === cl ? { x: p[0], y: p[1] } : null).filter(Boolean),
+        backgroundColor: colors[cl % colors.length] + "cc",
+        pointRadius: 4,
+        pointHoverRadius: 7,
+      }))
+    : [{
+        label: "PCA",
+        data: comps.map(p => ({ x: p[0], y: p[1] })),
+        backgroundColor: "#02b2ffcc",
+        pointRadius: 4,
+        pointHoverRadius: 7,
+      }];
+
+  box.innerHTML = "<canvas id='pca-canvas' style='width:100%;height:100%'></canvas>";
+  const ctx = $("pca-canvas").getContext("2d");
+  if (VizCharts.pca) VizCharts.pca.destroy();
+
+  const exp = pca?.explained || pca?.explained_variance || [];
+  VizCharts.pca = new Chart(ctx, {
+    type: "scatter",
+    data: { datasets },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: true },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const d = ctx.raw;
+              let txt = `(${d.x.toFixed(2)}, ${d.y.toFixed(2)})`;
+              if (hasClusters && ctx.dataset.label) txt += ` | ${ctx.dataset.label}`;
+              return txt;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          title: {
+            display: true,
+            text: `PC1${exp[0] ? ` (${(exp[0] * 100).toFixed(1)}%)` : ""}`,
+            color: "#b8c9d6"
+          },
+          min: minX,
+          max: maxX,
+          ticks: { color: getCss('--text-dim') }
+        },
+        y: {
+          title: {
+            display: true,
+            text: `PC2${exp[1] ? ` (${(exp[1] * 100).toFixed(1)}%)` : ""}`,
+            color: "#b8c9d6"
+          },
+          min: minY,
+          max: maxY,
+          ticks: { color: getCss('--text-dim') }
+        }
+      }
     }
-    $("role-badge") && ($("role-badge").textContent=me.role.toUpperCase());
-  }catch(e){
-    toast("Session expired. Please login.","warn");
-    setTimeout(()=>window.location.href="login.html",600);
-  }
+  });
+  syncExportButtons();
 }
-
-/* ---------------- Active dataset sync ---------------- */
-async function syncActiveFile(force=false){
-  if(!force && localStorage.getItem("filename")) return localStorage.getItem("filename");
-  try{
-    const r=await handleApi("/api/files");
-    const active=r.active||localStorage.getItem("filename");
-    if(active){
-      localStorage.setItem("filename",active);
-      localStorage.setItem("activeFile",active);
-    }
-    return active;
-  }catch(e){ console.warn("syncActiveFile",e); return null; }
 }
 function resetAnalysisCacheOnDatasetChange(newName){
   const prev=localStorage.getItem("filename");
@@ -186,97 +206,127 @@ async function smartSearch(){
     if(resBox){
       resBox.innerHTML=(data.links||[]).length
         ? data.links.map(l=>`<div><a href="#" onclick="fetchFromInternet('${l}')">${l}</a></div>`).join("")
-        : "<em>No CSV links found.</em>";
+        : "No results found.";
     }
     st&&(st.textContent="Done");
-  }catch(e){ st&&(st.textContent="Error"); toast("Search error: "+e.message,"error"); }
-}
-
-/* ---------------- Cleaning ---------------- */
-async function applyCleaning(){
-  const f=localStorage.getItem("filename"); if(!f){ toast("No dataset","warn"); return; }
-  const body={
-    filename:f,
-    remove_duplicates:$("remove-duplicates")?.checked,
-    drop_na:$("drop-na")?.checked,
-    fill_value:$("fill-value")?.value||null
-  };
-  try{
-    $("clean-status")&&( $("clean-status").textContent="Cleaning...");
-    const res = await handleApi("/api/clean",{method:"POST",body});
-    if(res.message === "already_clean"){
-      $("clean-status")&&( $("clean-status").textContent="Already clean");
-      toast("Dataset is already clean","info");
-    } else {
-      $("clean-status")&&( $("clean-status").textContent="Cleaned ✓");
-      toast("Cleaning applied","success");
-    }
-    await previewDataset(); inferColumnTypes();
   }catch(e){
-    $("clean-status")&&( $("clean-status").textContent="Failed");
-    toast("Clean error: "+e.message,"error");
+    st&&(st.textContent="Search failed");
+    toast("Search error: "+(e.message||"Unknown error"),"error");
   }
 }
 
-/* ---------------- Analyses ---------------- */
-async function runAnalysis(){
-  const m=$("analysis-method")?.value;
-  const column=$("column-name")?.value?.trim() || $("column-select")?.value?.trim();
-  const k=parseInt($("cluster-k")?.value||"3",10);
-  if(!m){ toast("Choose a method","warn"); return; }
-  try{
-    $("analysis-status")&&( $("analysis-status").textContent="Running...");
-    const payload={method:m}; if(m==="value_counts") payload.column=column; if(m==="kmeans") payload.k=k;
-    const data=await handleApi("/api/analyze",{method:"POST",body:payload});
-    switch(m){
-      case "summary":      lsSet("summary",data.summary); inferColumnTypes(); break;
-      case "correlation":  lsSet("correlation",compressCorr(data.correlation)); break;
-      case "value_counts": lsSet("valueCounts",{labels:data.labels,values:data.values,title:data.title}); break;
-      case "pca":          lsSet("pca",{components:data.components,explained:data.explained_variance,columns:data.columns}); break;
-      case "kmeans":       lsSet("kmeans",{labels_preview:data.labels,centers:data.centers,columns:data.columns}); break;
-      case "assoc_rules":  lsSet("assoc",data.rules); break;
-    }
-    $("analysis-status")&&( $("analysis-status").textContent="Done ✓");
-    toast("Analysis stored – open Visualize","success");
-  }catch(e){
-    $("analysis-status")&&( $("analysis-status").textContent="Error");
-    toast("Analysis error: "+e.message,"error");
+function renderKMeans() {
+  const km = lsGet("kmeans") || lsGet("autoBundle")?.kmeans;
+  const pca = lsGet("pca") || lsGet("autoBundle")?.pca;
+  const box = $("kmeans-box") || $("kmeans-container");
+  if (!box) return;
+  const labels = km?.labels_preview || km?.labels;
+  if (!labels || !Array.isArray(labels) || labels.length === 0) {
+    box.innerHTML = "<p class='text-small text-dim'>No clustering data.</p>";
+    return;
   }
-}
-function compressCorr(obj){
-  const out={}; const cols=Object.keys(obj||{});
-  cols.forEach(r=>{
-    out[r]={};
-    Object.keys(obj[r]||{}).forEach(c=>{
-      const v=obj[r][c]; out[r][c]=typeof v==="number"?Number(v.toFixed(4)):v;
+
+  // Use PCA for 2D plotting if available
+  const comps = pca?.components_2d;
+  if (!comps || comps.length !== labels.length) {
+    // fallback: 1D cluster plot
+    const pts = labels.map((lab, i) => ({ x: i, y: lab }));
+    // Find min/max for scaling
+    let minX = 0, maxX = labels.length - 1, minY = Math.min(...labels), maxY = Math.max(...labels);
+    const padX = (maxX - minX) * 0.05;
+    const padY = (maxY - minY) * 0.05;
+    minX -= padX; maxX += padX; minY -= padY; maxY += padY;
+    box.innerHTML = "<canvas id='kmeans-canvas' style='width:100%;height:100%'></canvas>";
+    const ctx = $("kmeans-canvas").getContext("2d");
+    if (VizCharts.kmeans) VizCharts.kmeans.destroy();
+    VizCharts.kmeans = new Chart(ctx, {
+      type: "scatter",
+      data: { datasets: [{ label: "Clusters", data: pts, backgroundColor: "#b136ffcc" }] },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { min: minX, max: maxX, title: { display: true, text: "Index", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } },
+          y: { min: minY, max: maxY, title: { display: true, text: "Cluster", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } }
+        }
+      }
     });
+    syncExportButtons();
+    return;
+  }
+
+  // 2D cluster plot in PCA space
+  // Find min/max for scaling
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  comps.forEach(([x, y]) => {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
   });
-  return out;
+  const padX = (maxX - minX) * 0.05;
+  const padY = (maxY - minY) * 0.05;
+  minX -= padX; maxX += padX; minY -= padY; maxY += padY;
+
+  const colors = ["#02b2ff", "#b136ff", "#ffb86c", "#10b981", "#ef4444", "#f59e42", "#7a4bff", "#ff7a7a"];
+  const clusters = [...new Set(labels)];
+  const datasets = clusters.map((cl, idx) => ({
+    label: "Cluster " + cl,
+    data: comps.map((p, i) => labels[i] === cl ? { x: p[0], y: p[1] } : null).filter(Boolean),
+    backgroundColor: colors[cl % colors.length] + "cc",
+    pointRadius: 4,
+    pointHoverRadius: 7,
+  }));
+
+  // Cluster centers (if available)
+  let centers = [];
+  if (km?.centers && km.centers[0].length >= 2) {
+    centers = km.centers.map((c, i) => ({
+      x: c[0], y: c[1], cluster: i
+    }));
+    datasets.push({
+      label: "Centers",
+      data: centers,
+      backgroundColor: "#fff",
+      borderColor: "#000",
+      pointRadius: 8,
+      pointStyle: "rectRot",
+      showLine: false
+    });
+  }
+
+  box.innerHTML = "<canvas id='kmeans-canvas' style='width:100%;height:100%'></canvas>";
+  const ctx = $("kmeans-canvas").getContext("2d");
+  if (VizCharts.kmeans) VizCharts.kmeans.destroy();
+
+  VizCharts.kmeans = new Chart(ctx, {
+    type: "scatter",
+    data: { datasets },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: true },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const d = ctx.raw;
+              let txt = `(${d.x.toFixed(2)}, ${d.y.toFixed(2)})`;
+              if (ctx.dataset.label && ctx.dataset.label.startsWith("Cluster")) txt += ` | ${ctx.dataset.label}`;
+              if (ctx.dataset.label === "Centers") txt += " (center)";
+              return txt;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { min: minX, max: maxX, title: { display: true, text: "PC1", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } },
+        y: { min: minY, max: maxY, title: { display: true, text: "PC2", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } }
+      }
+    }
+  });
+  syncExportButtons();
 }
 
-/* ---------------- AI Insight ---------------- */
-async function buildAISnippet(maxRows=20){
-  const bundle=lsGet("autoBundle");
-  const file=localStorage.getItem("filename");
-  let preview=null;
-  try{
-    const res=await handleApi("/api/preview_json",{method:"POST",body:{filename:file}});
-    preview={columns:res.columns,rows:(res.rows||[]).slice(0,maxRows)};
-  }catch(_){}
-  return {
-    meta: bundle?.profile?.basic || {},
-    top_corr: (bundle?.top_correlations||[]).slice(0,8),
-    value_counts: bundle?.categorical ? Object.fromEntries(Object.entries(bundle.categorical).slice(0,2)) : null,
-    summary_stats: bundle?.summary ? Object.fromEntries(Object.entries(bundle.summary).slice(0,6)) : null,
-    preview
-  };
-}
-const stripFences = str => typeof str==="string"
-  ? str.replace(/```json|```/gi,"")
-       .replace(/^\s*"{?\s*json"?\s*[:{]/i,"{")
-       .replace(/^\s*json\s*[:{]/i,"{")
-       .trim()
-  : str;
 
 function cleanAIBlock(objOrStr){
   if(typeof objOrStr === "string"){
@@ -770,12 +820,30 @@ function copyToClipboard(txt){
 }
 
 /* ---------- PCA ---------- */
-function renderPCA(){
+
+function renderPCA() {
   const pca = lsGet("pca") || lsGet("autoBundle")?.pca;
   const km = lsGet("kmeans") || lsGet("autoBundle")?.kmeans;
-  const box = $("pca-box") || $("pca-container"); if(!box) return;
+  const box = $("pca-box") || $("pca-container");
+  if (!box) return;
   const comps = pca?.components_2d || pca?.components;
-  if(!comps){ box.innerHTML="<p class='text-small text-dim'>No PCA data.</p>"; return; }
+  if (!comps || !Array.isArray(comps) || comps.length === 0) {
+    box.innerHTML = "<p class='text-small text-dim'>No PCA data.</p>";
+    return;
+  }
+
+  // Find min/max for scaling
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  comps.forEach(([x, y]) => {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  });
+  // Add 5% padding
+  const padX = (maxX - minX) * 0.05;
+  const padY = (maxY - minY) * 0.05;
+  minX -= padX; maxX += padX; minY -= padY; maxY += padY;
 
   // Try to color by cluster if available
   const labels = km?.labels_preview || [];
@@ -797,9 +865,9 @@ function renderPCA(){
         pointHoverRadius: 7,
       }];
 
-  box.innerHTML="<canvas id='pca-canvas' style='width:100%;height:100%'></canvas>";
+  box.innerHTML = "<canvas id='pca-canvas' style='width:100%;height:100%'></canvas>";
   const ctx = $("pca-canvas").getContext("2d");
-  if(VizCharts.pca) VizCharts.pca.destroy();
+  if (VizCharts.pca) VizCharts.pca.destroy();
 
   const exp = pca?.explained || pca?.explained_variance || [];
   VizCharts.pca = new Chart(ctx, {
@@ -814,7 +882,7 @@ function renderPCA(){
             label: ctx => {
               const d = ctx.raw;
               let txt = `(${d.x.toFixed(2)}, ${d.y.toFixed(2)})`;
-              if(hasClusters && ctx.dataset.label) txt += ` | ${ctx.dataset.label}`;
+              if (hasClusters && ctx.dataset.label) txt += ` | ${ctx.dataset.label}`;
               return txt;
             }
           }
@@ -822,6 +890,8 @@ function renderPCA(){
       },
       scales: {
         x: {
+          min: minX,
+          max: maxX,
           title: {
             display: true,
             text: `PC1${exp[0] ? ` (${(exp[0]*100).toFixed(1)}%)` : ""}`,
@@ -830,6 +900,8 @@ function renderPCA(){
           ticks: { color: getCss('--text-dim') }
         },
         y: {
+          min: minY,
+          max: maxY,
           title: {
             display: true,
             text: `PC2${exp[1] ? ` (${(exp[1]*100).toFixed(1)}%)` : ""}`,
@@ -844,28 +916,41 @@ function renderPCA(){
 }
 
 /* ---------- KMeans ---------- */
-function renderKMeans(){
+
+function renderKMeans() {
   const km = lsGet("kmeans") || lsGet("autoBundle")?.kmeans;
   const pca = lsGet("pca") || lsGet("autoBundle")?.pca;
-  const box = $("kmeans-box") || $("kmeans-container"); if(!box) return;
+  const box = $("kmeans-box") || $("kmeans-container");
+  if (!box) return;
   const labels = km?.labels_preview || km?.labels;
-  if(!labels){ box.innerHTML="<p class='text-small text-dim'>No clustering data.</p>"; return; }
+  if (!labels) {
+    box.innerHTML = "<p class='text-small text-dim'>No clustering data.</p>";
+    return;
+  }
 
   // Use PCA for 2D plotting if available
   const comps = pca?.components_2d;
-  if(!comps || comps.length !== labels.length){
+  if (!comps || comps.length !== labels.length) {
     // fallback: 1D cluster plot
-    const pts = labels.map((lab,i)=>({x:i,y:lab}));
-    box.innerHTML="<canvas id='kmeans-canvas' style='width:100%;height:100%'></canvas>";
+    const pts = labels.map((lab, i) => ({ x: i, y: lab }));
+    // Find min/max for scaling
+    let minX = 0, maxX = labels.length - 1, minY = Math.min(...labels), maxY = Math.max(...labels);
+    const padX = (maxX - minX) * 0.05;
+    const padY = (maxY - minY) * 0.05;
+    minX -= padX; maxX += padX; minY -= padY; maxY += padY;
+    box.innerHTML = "<canvas id='kmeans-canvas' style='width:100%;height:100%'></canvas>";
     const ctx = $("kmeans-canvas").getContext("2d");
-    if(VizCharts.kmeans) VizCharts.kmeans.destroy();
+    if (VizCharts.kmeans) VizCharts.kmeans.destroy();
     VizCharts.kmeans = new Chart(ctx, {
       type: "scatter",
       data: { datasets: [{ label: "Clusters", data: pts, backgroundColor: "#b136ffcc" }] },
       options: {
         responsive: true,
         plugins: { legend: { display: false } },
-        scales: { x: { ticks: { color: getCss('--text-dim') } }, y: { ticks: { color: getCss('--text-dim') } } }
+        scales: {
+          x: { min: minX, max: maxX, ticks: { color: getCss('--text-dim') } },
+          y: { min: minY, max: maxY, ticks: { color: getCss('--text-dim') } }
+        }
       }
     });
     syncExportButtons();
@@ -873,20 +958,32 @@ function renderKMeans(){
   }
 
   // 2D cluster plot in PCA space
+  // Find min/max for scaling
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  comps.forEach(([x, y]) => {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  });
+  const padX = (maxX - minX) * 0.05;
+  const padY = (maxY - minY) * 0.05;
+  minX -= padX; maxX += padX; minY -= padY; maxY += padY;
+
   const colors = ["#02b2ff","#b136ff","#ffb86c","#10b981","#ef4444","#f59e42","#7a4bff","#ff7a7a"];
   const clusters = [...new Set(labels)];
-  const datasets = clusters.map((cl,idx)=>({
-    label: "Cluster "+cl,
-    data: comps.map((p,i)=>labels[i]===cl?{x:p[0],y:p[1]}:null).filter(Boolean),
-    backgroundColor: colors[cl%colors.length]+"cc",
+  const datasets = clusters.map((cl, idx) => ({
+    label: "Cluster " + cl,
+    data: comps.map((p, i) => labels[i] === cl ? { x: p[0], y: p[1] } : null).filter(Boolean),
+    backgroundColor: colors[cl % colors.length] + "cc",
     pointRadius: 4,
     pointHoverRadius: 7,
   }));
 
   // Cluster centers (if available)
   let centers = [];
-  if(km?.centers && km.centers[0].length >= 2){
-    centers = km.centers.map((c,i)=>({
+  if (km?.centers && km.centers[0].length >= 2) {
+    centers = km.centers.map((c, i) => ({
       x: c[0], y: c[1], cluster: i
     }));
     datasets.push({
@@ -900,9 +997,9 @@ function renderKMeans(){
     });
   }
 
-  box.innerHTML="<canvas id='kmeans-canvas' style='width:100%;height:100%'></canvas>";
+  box.innerHTML = "<canvas id='kmeans-canvas' style='width:100%;height:100%'></canvas>";
   const ctx = $("kmeans-canvas").getContext("2d");
-  if(VizCharts.kmeans) VizCharts.kmeans.destroy();
+  if (VizCharts.kmeans) VizCharts.kmeans.destroy();
 
   VizCharts.kmeans = new Chart(ctx, {
     type: "scatter",
@@ -916,16 +1013,16 @@ function renderKMeans(){
             label: ctx => {
               const d = ctx.raw;
               let txt = `(${d.x.toFixed(2)}, ${d.y.toFixed(2)})`;
-              if(ctx.dataset.label && ctx.dataset.label.startsWith("Cluster")) txt += ` | ${ctx.dataset.label}`;
-              if(ctx.dataset.label === "Centers") txt += " (center)";
+              if (ctx.dataset.label && ctx.dataset.label.startsWith("Cluster")) txt += ` | ${ctx.dataset.label}`;
+              if (ctx.dataset.label === "Centers") txt += " (center)";
               return txt;
             }
           }
         }
       },
       scales: {
-        x: { title: { display: true, text: "PC1", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } },
-        y: { title: { display: true, text: "PC2", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } }
+        x: { min: minX, max: maxX, title: { display: true, text: "PC1", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } },
+        y: { min: minY, max: maxY, title: { display: true, text: "PC2", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } }
       }
     }
   });
@@ -939,17 +1036,8 @@ async function inferColumnTypes() {
   try {
     const res = await handleApi("/api/coltypes");
     if (res.types) lsSet("colTypesCache", res.types);
-  } catch (e) {}
+  } catch (e) {
+    console.error("Error inferring column types:", e);
+  }
 }
-
-function renderOverview() {
-  // TODO: Implement overview rendering logic
-  const box = document.getElementById("overview-meta");
-  if (box) box.innerHTML = "<p class='text-dim'>Overview not implemented yet.</p>";
-}
-
-function renderAINarrative() {
-  // TODO: Implement AI narrative rendering logic
-  const box = document.getElementById("ai-narrative-box");
-  if (box) box.innerHTML = "<p class='text-dim'>AI Narrative not implemented yet.</p>";
 }
