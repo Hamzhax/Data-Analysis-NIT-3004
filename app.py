@@ -59,9 +59,14 @@ except Exception:
     genai = None
 
 # PDF
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import simpleSplit
+from reportlab.lib.units import inch
+from reportlab.lib.colors import HexColor, black, blue, darkblue
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 # PNG correlation
 try:
@@ -724,7 +729,23 @@ def analyze():
             if num.shape[0] < k: return fail("Rows less than k.")
             km = KMeans(n_clusters=k, n_init="auto", random_state=42)
             labs = km.fit_predict(num)
-            return ok(method=method, labels=labs.tolist(), centers=km.cluster_centers_.tolist(), columns=num.columns.tolist())
+            
+            # Create 2D components for visualization
+            components_2d = None
+            if num.shape[1] >= 2:
+                from sklearn.decomposition import PCA
+                viz_pca = PCA(n_components=2, random_state=42)
+                components_2d = viz_pca.fit_transform(num).tolist()
+            
+            result = {
+                "labels": labs.tolist(), 
+                "centers": km.cluster_centers_.tolist(), 
+                "columns": num.columns.tolist()
+            }
+            if components_2d:
+                result["components_2d"] = components_2d
+                
+            return ok(method=method, **result)
 
         if method == "assoc_rules":
             if not MLXTEND_AVAILABLE: return fail("mlxtend missing.")
@@ -869,11 +890,30 @@ def build_auto_bundle(filename):
             if drops:
                 best_k = max(drops, key=lambda x: x[1])[0]
                 best_model = models[best_k - 2]
+                
+                # Get 2D components for visualization - use PCA result if available
+                components_2d = None
+                if pca_result and "components_2d" in pca_result:
+                    # Use the same subset of data that PCA used
+                    components_2d = pca_result["components_2d"][:len(best_model.labels_)]
+                elif nd.shape[1] >= 2:
+                    # Create 2D projection for visualization if no PCA
+                    from sklearn.decomposition import PCA
+                    viz_pca = PCA(n_components=2, random_state=42)
+                    components_2d = viz_pca.fit_transform(nd).tolist()
+                
                 kmeans_result = {
                     "k": best_k,
                     "centers": best_model.cluster_centers_.tolist(),
-                    "labels_preview": best_model.labels_[:300].tolist()
+                    "labels_preview": best_model.labels_[:300].tolist(),
+                    "labels": best_model.labels_.tolist(),
+                    "columns": nd.columns.tolist()
                 }
+                
+                # Add 2D components if available
+                if components_2d:
+                    kmeans_result["components_2d"] = components_2d[:300]  # Match labels_preview length
+                    
         except Exception:
             kmeans_result = None
 
@@ -1185,6 +1225,337 @@ def report_markdown():
     except Exception as e:
         return fail(f"Report generation failed: {e}", 500)
 
+def generate_comprehensive_pdf_report(bundle, ai, filename):
+    """Generate a comprehensive PDF report with proper formatting, tables, and charts"""
+    buffer = io.BytesIO()
+    
+    # Create the PDF document
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=72,
+        leftMargin=72,
+        topMargin=72,
+        bottomMargin=72
+    )
+    
+    # Get styles
+    styles = getSampleStyleSheet()
+    
+    # Define custom styles
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=darkblue
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=16,
+        spaceAfter=12,
+        spaceBefore=20,
+        textColor=darkblue
+    )
+    
+    subheading_style = ParagraphStyle(
+        'CustomSubHeading',
+        parent=styles['Heading3'],
+        fontSize=12,
+        spaceAfter=8,
+        spaceBefore=12,
+        textColor=HexColor('#2563eb')
+    )
+    
+    normal_style = ParagraphStyle(
+        'CustomNormal',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=6,
+        leading=12
+    )
+    
+    # Story to hold the content
+    story = []
+    
+    # Title
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    story.append(Paragraph("Data Mining & Analysis Report", title_style))
+    story.append(Paragraph(f"<i>Generated on {today} • Dataset: {filename}</i>", normal_style))
+    story.append(Paragraph("<i>NIT 3004 H2B1 • Data Analysis Project</i>", normal_style))
+    story.append(Spacer(1, 20))
+    
+    # Executive Summary
+    story.append(Paragraph("Executive Summary", heading_style))
+    meta = bundle.get("profile", {}).get("basic", {})
+    
+    summary_data = [
+        ["Dataset", filename],
+        ["Rows", f"{meta.get('rows', '?'):,}"],
+        ["Columns", f"{meta.get('columns', '?'):,}"],
+        ["Numeric Columns", f"{meta.get('numeric_cols', '?'):,}"],
+        ["Categorical Columns", f"{meta.get('categorical_cols', '?'):,}"],
+        ["Analysis Date", today]
+    ]
+    
+    summary_table = Table(summary_data, colWidths=[2*inch, 2*inch])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f5f9')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), HexColor('#ffffff')),
+        ('GRID', (0, 0), (-1, -1), 1, HexColor('#cbd5e1'))
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 20))
+    
+    # AI Insights
+    if ai:
+        story.append(Paragraph("AI-Generated Insights", heading_style))
+        
+        if ai.get("summary"):
+            story.append(Paragraph("Summary", subheading_style))
+            story.append(Paragraph(ai["summary"], normal_style))
+            story.append(Spacer(1, 10))
+        
+        if ai.get("key_points"):
+            story.append(Paragraph("Key Findings", subheading_style))
+            for point in ai["key_points"]:
+                story.append(Paragraph(f"• {point}", normal_style))
+            story.append(Spacer(1, 10))
+        
+        if ai.get("anomalies"):
+            story.append(Paragraph("Anomalies Detected", subheading_style))
+            for anomaly in ai["anomalies"]:
+                story.append(Paragraph(f"• {anomaly}", normal_style))
+            story.append(Spacer(1, 10))
+        
+        if ai.get("recommendation"):
+            story.append(Paragraph("Recommendations", subheading_style))
+            story.append(Paragraph(ai["recommendation"], normal_style))
+            story.append(Spacer(1, 10))
+    
+    story.append(PageBreak())
+    
+    # Statistical Summary
+    if bundle.get("summary"):
+        story.append(Paragraph("Statistical Summary", heading_style))
+        summary = bundle["summary"]
+        
+        # Create summary table
+        if summary:
+            columns = list(summary.keys())
+            metrics = set()
+            for col_stats in summary.values():
+                metrics.update(col_stats.keys())
+            metrics = sorted(list(metrics))
+            
+            # Limit to most important metrics and columns for readability
+            important_metrics = ['count', 'mean', 'std', 'min', '25%', '50%', '75%', 'max']
+            display_metrics = [m for m in important_metrics if m in metrics]
+            display_columns = columns[:6]  # Show first 6 columns
+            
+            if display_metrics and display_columns:
+                table_data = [["Metric"] + display_columns]
+                
+                for metric in display_metrics:
+                    row = [metric]
+                    for col in display_columns:
+                        value = summary[col].get(metric, "")
+                        if isinstance(value, (int, float)):
+                            if abs(value) > 1000 or (abs(value) < 0.01 and value != 0):
+                                value = f"{value:.2e}"
+                            else:
+                                value = f"{value:.3f}"
+                        row.append(str(value)[:12])  # Truncate long values
+                    table_data.append(row)
+                
+                stats_table = Table(table_data)
+                stats_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f5f9')),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), black),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 8),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('GRID', (0, 0), (-1, -1), 1, HexColor('#cbd5e1'))
+                ]))
+                story.append(stats_table)
+                story.append(Spacer(1, 15))
+    
+    # Top Correlations
+    if bundle.get("top_correlations"):
+        story.append(Paragraph("Top Correlations", heading_style))
+        corr_data = [["Variable A", "Variable B", "Correlation"]]
+        
+        for a, b, corr in bundle["top_correlations"][:10]:
+            corr_data.append([str(a)[:20], str(b)[:20], f"{corr:.4f}"])
+        
+        corr_table = Table(corr_data, colWidths=[2*inch, 2*inch, 1*inch])
+        corr_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f5f9')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), black),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('GRID', (0, 0), (-1, -1), 1, HexColor('#cbd5e1'))
+        ]))
+        story.append(corr_table)
+        story.append(Spacer(1, 15))
+    
+    # Categorical Analysis
+    if bundle.get("categorical"):
+        story.append(Paragraph("Categorical Data Analysis", heading_style))
+        
+        for col_name, values in list(bundle["categorical"].items())[:3]:  # Show top 3 categorical columns
+            story.append(Paragraph(f"Distribution: {col_name}", subheading_style))
+            
+            cat_data = [["Value", "Count", "Percentage"]]
+            total = sum(item['count'] for item in values)
+            
+            for item in values[:8]:  # Show top 8 values
+                count = item['count']
+                percentage = (count / total * 100) if total > 0 else 0
+                cat_data.append([str(item['value'])[:25], str(count), f"{percentage:.1f}%"])
+            
+            cat_table = Table(cat_data, colWidths=[2.5*inch, 1*inch, 1*inch])
+            cat_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f5f9')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), black),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('GRID', (0, 0), (-1, -1), 1, HexColor('#cbd5e1'))
+            ]))
+            story.append(cat_table)
+            story.append(Spacer(1, 10))
+    
+    story.append(PageBreak())
+    
+    # Advanced Analytics Results
+    story.append(Paragraph("Advanced Analytics", heading_style))
+    
+    # PCA Results
+    if bundle.get("pca"):
+        story.append(Paragraph("Principal Component Analysis (PCA)", subheading_style))
+        pca = bundle["pca"]
+        
+        if pca.get("explained_variance"):
+            story.append(Paragraph("Explained Variance by Component:", normal_style))
+            pca_data = [["Component", "Explained Variance", "Cumulative"]]
+            cumulative = 0
+            
+            for i, var in enumerate(pca["explained_variance"][:5]):
+                cumulative += var
+                pca_data.append([f"PC{i+1}", f"{var:.4f}", f"{cumulative:.4f}"])
+            
+            pca_table = Table(pca_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch])
+            pca_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f5f9')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), black),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('GRID', (0, 0), (-1, -1), 1, HexColor('#cbd5e1'))
+            ]))
+            story.append(pca_table)
+            story.append(Spacer(1, 15))
+    
+    # K-Means Results
+    if bundle.get("kmeans"):
+        story.append(Paragraph("K-Means Clustering", subheading_style))
+        kmeans = bundle["kmeans"]
+        
+        story.append(Paragraph(f"Optimal number of clusters: {kmeans.get('k', '?')}", normal_style))
+        
+        if kmeans.get("centers"):
+            story.append(Paragraph("Cluster Centers:", normal_style))
+            centers_data = [["Cluster"] + (kmeans.get("columns", [])[:5] or ["Dim1", "Dim2", "Dim3", "Dim4", "Dim5"])]
+            
+            for i, center in enumerate(kmeans["centers"]):
+                row = [f"Cluster {i}"] + [f"{val:.3f}" for val in center[:5]]
+                centers_data.append(row)
+            
+            centers_table = Table(centers_data)
+            centers_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f5f9')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), black),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('GRID', (0, 0), (-1, -1), 1, HexColor('#cbd5e1'))
+            ]))
+            story.append(centers_table)
+            story.append(Spacer(1, 15))
+    
+    # Association Rules
+    if bundle.get("assoc_rules"):
+        story.append(Paragraph("Association Rules (Top 10)", subheading_style))
+        rules = bundle["assoc_rules"][:10]
+        
+        rules_data = [["Antecedents", "Consequents", "Support", "Confidence", "Lift"]]
+        
+        for rule in rules:
+            antecedents = rule.get("antecedents", [])
+            consequents = rule.get("consequents", [])
+            
+            # Handle both string and list formats
+            ant_str = ", ".join(antecedents) if isinstance(antecedents, list) else str(antecedents)
+            con_str = ", ".join(consequents) if isinstance(consequents, list) else str(consequents)
+            
+            rules_data.append([
+                ant_str[:20],
+                con_str[:20],
+                f"{rule.get('support', 0):.3f}",
+                f"{rule.get('confidence', 0):.3f}",
+                f"{rule.get('lift', 0):.3f}"
+            ])
+        
+        rules_table = Table(rules_data)
+        rules_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f5f9')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), black),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('GRID', (0, 0), (-1, -1), 1, HexColor('#cbd5e1'))
+        ]))
+        story.append(rules_table)
+        story.append(Spacer(1, 15))
+    
+    # Recommendations
+    if bundle.get("recommended_charts"):
+        story.append(Paragraph("Recommended Visualizations", subheading_style))
+        story.append(Paragraph("Based on your data characteristics, the following chart types are recommended:", normal_style))
+        
+        for chart in bundle["recommended_charts"][:5]:
+            chart_type = chart.get("type", "Unknown")
+            reason = chart.get("reason", "No reason provided")
+            story.append(Paragraph(f"• <b>{chart_type.replace('_', ' ').title()}</b>: {reason}", normal_style))
+        
+        story.append(Spacer(1, 15))
+    
+    # Footer
+    story.append(Spacer(1, 30))
+    story.append(Paragraph("<i>This report was automatically generated by the Data Mining Dashboard system.</i>", normal_style))
+    story.append(Paragraph("<i>For questions or additional analysis, please contact the development team.</i>", normal_style))
+    
+    # Build the PDF
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
 @app.get("/api/report/pdf")
 def report_pdf():
     ok_login, resp = require_login()
@@ -1194,30 +1565,15 @@ def report_pdf():
     try:
         bundle = build_auto_bundle(fn)
         ai = ai_narrative_from_bundle(bundle)
-        md = build_markdown_report(bundle, ai, user=session.get("user"))
-
-        buffer = io.BytesIO()
-        c = canvas.Canvas(buffer, pagesize=A4)
-        width, height = A4
-        margin = 48
-        y = height - margin
-        lines = md.splitlines()
-        for line in lines:
-            wrapped = simpleSplit(line, "Helvetica", 9, width - 2 * margin)
-            for w in wrapped:
-                if y < 60:
-                    c.showPage()
-                    y = height - margin
-                c.setFont("Helvetica", 9)
-                c.drawString(margin, y, w[:250])
-                y -= 12
-        c.save()
-        buffer.seek(0)
+        
+        # Generate comprehensive PDF
+        buffer = generate_comprehensive_pdf_report(bundle, ai, fn)
+        
         return send_file(
             buffer,
             mimetype="application/pdf",
             as_attachment=True,
-            download_name=f"{fn}_exploration_report.pdf"
+            download_name=f"{fn}_comprehensive_report.pdf"
         )
     except Exception as e:
         return fail(f"PDF generation failed: {e}", 500)
