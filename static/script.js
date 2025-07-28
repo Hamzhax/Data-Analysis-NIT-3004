@@ -443,10 +443,11 @@ async function autoExplore(){
     const res=await handleApi("/api/auto_explore",{method:"POST"});
     storeAutoBundle(res);
     prog&&(prog.textContent="Complete ✓");
-    if (!window._autoExploreToastShown) {
+    // Use a more robust toast prevention mechanism
+    const toastKey = `autoExploreToast_${Date.now()}`;
+    if (!window._lastAutoExploreToast || Date.now() - window._lastAutoExploreToast > 3000) {
       toast("Auto Explore complete","success");
-      window._autoExploreToastShown = true;
-      setTimeout(()=>{window._autoExploreToastShown=false;}, 2000);
+      window._lastAutoExploreToast = Date.now();
     }
     inferColumnTypes();
     if(document.body.getAttribute("data-page")==="visualization"){
@@ -518,6 +519,10 @@ async function downloadMarkdownReport(){
   }catch(e){ st&&(st.textContent="Error"); toast("Report error: "+e.message,"error"); }
 }
 async function downloadPdfReport(){
+  // Prevent multiple simultaneous downloads
+  if (window._pdfDownloadInProgress) return;
+  window._pdfDownloadInProgress = true;
+  
   const st=$("report-status")||$("viz-export-status");
   st&&(st.textContent="Generating PDF...");
   try{
@@ -544,6 +549,9 @@ async function downloadPdfReport(){
     st&&(st.textContent="PDF ready");
     toast("PDF ready","success");
   }catch(e){ st&&(st.textContent="Error"); toast("PDF error: "+e.message,"error"); }
+  finally {
+    window._pdfDownloadInProgress = false;
+  }
 }
 function downloadBlob(blob,filename){
   const a=document.createElement("a");
@@ -839,11 +847,17 @@ function renderPCA(){
   const pca=lsGet("pca")||lsGet("autoBundle")?.pca;
   const box=$("pca-box")||$("pca-container"); if(!box) return;
   
-  console.log("PCA data:", pca); // Debug output
+  console.log("PCA data from storage:", pca); // Debug output
+  console.log("AutoBundle:", lsGet("autoBundle")); // Debug output
   
   const comps=pca?.components_2d || pca?.components;
   if(!pca || !comps || !Array.isArray(comps) || comps.length === 0){ 
-    box.innerHTML="<p class='text-small text-dim'>No PCA data. Run PCA analysis or Auto Explore with ≥2 numeric columns.</p>"; 
+    const bundle = lsGet("autoBundle");
+    if(bundle && bundle.pca) {
+      box.innerHTML="<p class='text-small text-dim'>PCA data exists but components are not available. This might indicate insufficient numeric data for dimensionality reduction.</p>"; 
+    } else {
+      box.innerHTML="<p class='text-small text-dim'>No PCA data available. Try running Auto Explore first to generate principal component analysis.</p>"; 
+    }
     return; 
   }
   // Robust scaling: trim outliers, pad axes
@@ -1008,15 +1022,39 @@ function renderAINarrative(){
 
   const raw = lsGet("autoAI") || lsGet("lastAI");
   if(!raw){
-    // Show a generic paragraph about the data if no AI
+    // Show a more informative generic paragraph about the data if no AI
     const meta = lsGet("meta") || lsGet("autoBundle")?.meta || lsGet("autoBundle")?.profile?.basic;
-    let summary = "<p class='text-dim'>No AI insight available. This dataset contains ";
+    const bundle = lsGet("autoBundle");
+    let summary = "<p class='text-dim' style='font-size: 0.9rem; line-height: 1.4;'>This dataset";
+    
     if (meta && (meta.n_rows || meta.rows) && (meta.n_cols || meta.columns)) {
-      summary += `${meta.n_rows||meta.rows} rows and ${meta.n_cols||meta.columns} columns`;
-      if (meta.file_name || meta.filename) summary += ` from <b>${meta.file_name||meta.filename}</b>`;
-      summary += ".";
+      const rows = meta.n_rows || meta.rows;
+      const cols = meta.n_cols || meta.columns;
+      summary += ` contains <strong>${rows} rows</strong> and <strong>${cols} columns</strong>`;
+      if (meta.file_name || meta.filename) summary += ` from <strong>${meta.file_name||meta.filename}</strong>`;
+      summary += ". ";
+      
+      // Add insights about data characteristics
+      summary += `With ${cols} features across ${rows} observations, this dataset provides `;
+      if (rows > 1000) summary += "substantial ";
+      else if (rows > 100) summary += "adequate ";
+      summary += "information for statistical analysis. ";
+      
+      // Add some insights about what analyses are available
+      if (bundle) {
+        const analyses = [];
+        if (bundle.correlation_matrix) analyses.push("correlation patterns");
+        if (bundle.pca) analyses.push("dimensionality reduction (PCA)");
+        if (bundle.kmeans) analyses.push("clustering analysis");
+        if (bundle.categorical) analyses.push("categorical distributions");
+        if (bundle.summary) analyses.push("statistical summaries");
+        
+        if (analyses.length > 0) {
+          summary += `Available insights include: ${analyses.join(", ")}.`;
+        }
+      }
     } else {
-      summary += "tabular data ready for analysis.";
+      summary += " is ready for comprehensive analysis using various statistical and machine learning techniques.";
     }
     summary += "</p>";
     box.innerHTML = summary;
@@ -1219,9 +1257,9 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   $("qi-run")?.addEventListener("click",generateAISummary);
   $("qi-rerun")?.addEventListener("click",generateAISummary);
   $("auto-explore-btn")?.addEventListener("click",autoExplore);
-  $("viz-auto-explore")?.addEventListener("click",autoExplore);
-  $("md-report-btn")?.addEventListener("click",downloadMarkdownReport);
-  $("pdf-report-btn")?.addEventListener("click",downloadPdfReport);
+  // viz-auto-explore and pdf-report-btn handled in individual page scripts to prevent double binding
+  // $("md-report-btn")?.addEventListener("click",downloadMarkdownReport); // Commented out - handled in individual pages
+  // PDF button bindings also handled in individual pages to prevent double downloads
   $("btn-clear-cache")?.addEventListener("click",clearAnalysis);
   $("viz-clear-cache")?.addEventListener("click",clearAnalysis);
 

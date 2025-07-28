@@ -412,14 +412,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     try{ 
       await autoExplore(); 
       st.textContent="Done ✓"; 
-      ensureCorrelation?.(); 
-      renderAINarrative?.(); 
-      renderOverview?.();
-      renderValueCounts?.();
-      renderPCA?.();
-      renderKMeans?.();
-      renderAssoc?.();
-      renderSummary?.();
+      // Don't call rendering functions here - they are handled in autoExplore()
     }
     catch(err){ st.textContent="Error"; toast(err.message,"error"); }
     finally { hideSpinner(); }
