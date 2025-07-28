@@ -1008,7 +1008,18 @@ function renderAINarrative(){
 
   const raw = lsGet("autoAI") || lsGet("lastAI");
   if(!raw){
-    box.innerHTML = "<p class='text-small text-dim'>No AI narrative yet.</p>";
+    // Show a generic paragraph about the data if no AI
+    const meta = lsGet("meta") || lsGet("autoBundle")?.meta || lsGet("autoBundle")?.profile?.basic;
+    let summary = "<p class='text-dim'>No AI insight available. This dataset contains ";
+    if (meta && (meta.n_rows || meta.rows) && (meta.n_cols || meta.columns)) {
+      summary += `${meta.n_rows||meta.rows} rows and ${meta.n_cols||meta.columns} columns`;
+      if (meta.file_name || meta.filename) summary += ` from <b>${meta.file_name||meta.filename}</b>`;
+      summary += ".";
+    } else {
+      summary += "tabular data ready for analysis.";
+    }
+    summary += "</p>";
+    box.innerHTML = summary;
     return;
   }
 
