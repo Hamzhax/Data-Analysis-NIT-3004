@@ -356,12 +356,74 @@ async function autoExplore(){
     toast("Auto Explore complete","success");
     inferColumnTypes();
     if(document.body.getAttribute("data-page")==="visualization"){
-      ensureCorrelation(); renderOverview(); renderAINarrative(); syncExportButtons();
+      updateVizDatasetMeta();
+      ensureCorrelation();
+      renderOverview();
+      renderAINarrative();
+      syncExportButtons();
     }
   }catch(e){
     prog&&(prog.textContent="Error");
     toast("Auto explore failed: "+e.message,"error");
   }
+function updateVizDatasetMeta() {
+  const metaBox = document.getElementById("viz-dataset-meta");
+  const filename = localStorage.getItem("filename");
+  if (metaBox) {
+    metaBox.textContent = filename ? filename : "No active dataset.";
+  }
+}
+
+function renderOverview() {
+  const box = document.getElementById("overview-meta");
+  const bundle = lsGet("autoBundle");
+  if (!box) return;
+  if (!bundle || !bundle.profile || !bundle.profile.basic) {
+    box.innerHTML = "<p class='text-dim'>No overview available. Run Auto Explore.</p>";
+    return;
+  }
+  const meta = bundle.profile.basic;
+  box.innerHTML = `
+    <div>
+      <strong>Rows:</strong> ${meta.rows ?? "?"} &nbsp; 
+      <strong>Columns:</strong> ${meta.columns ?? "?"} &nbsp; 
+      <strong>Numeric:</strong> ${meta.numeric_cols ?? "?"} &nbsp; 
+      <strong>Categorical:</strong> ${meta.categorical_cols ?? "?"}
+    </div>
+    <div style="margin-top:.7em;">
+      <strong>Sample columns:</strong> ${meta.columns_list ? meta.columns_list.join(", ") : ""}
+    </div>
+  `;
+}
+
+function renderAINarrative() {
+  const box = document.getElementById("ai-narrative-box");
+  const ai = lsGet("lastAI") || lsGet("autoAI");
+  if (!box) return;
+  if (!ai) {
+    box.innerHTML = "<p class='text-dim'>No AI insight generated yet.</p>";
+    return;
+  }
+  let html = "";
+  if (ai.summary) html += `<p><strong>Summary:</strong> ${ai.summary}</p>`;
+  if (ai.key_points && ai.key_points.length) {
+    html += `<p><strong>Key Points</strong></p><ul>${ai.key_points.map(k => `<li>${k}</li>`).join("")}</ul>`;
+  }
+  if (ai.anomalies && ai.anomalies.length) {
+    html += `<p><strong>Anomalies</strong></p><ul>${ai.anomalies.map(a => `<li>${a}</li>`).join("")}</ul>`;
+  }
+  if (ai.recommendation) html += `<p><strong>Recommendation:</strong> ${ai.recommendation}</p>`;
+  box.innerHTML = html;
+}
+(function(){
+  if(document.body.getAttribute("data-page")==="visualization"){
+    document.addEventListener("DOMContentLoaded",function(){
+      updateVizDatasetMeta();
+      renderOverview();
+      renderAINarrative();
+    });
+  }
+})();
 }
 function storeAutoBundle(result){
   const b=result.bundle, ai=result.ai;
