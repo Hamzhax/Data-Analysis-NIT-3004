@@ -76,7 +76,7 @@
   {% if charts.value_counts %}
     <img src="{{ charts.value_counts }}" alt="Value Counts Chart">
   {% endif %}
-  {% if vc and vc.labels %}
+  {% if vc.labels %}
     <table>
       <thead><tr><th>Label</th><th>Count</th></tr></thead>
       <tbody>

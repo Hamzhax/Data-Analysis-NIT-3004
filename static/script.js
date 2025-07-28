@@ -989,6 +989,10 @@ async function loadMeta(){
   }catch(e){ box&&(box.textContent="Metadata error: "+e.message); }
 }
 
+function updateVizDatasetMeta(){
+  return loadMeta();
+}
+
 /* ---------------- Page inits ---------------- */
 function initVisualizationPage(){
   loadMeta();

@@ -142,6 +142,7 @@
 
     <span id="active-file-chip" class="chip">Active: —</span>
     <span class="ver">v4.6 • NIT 3004 H2B1</span>
+    <span id="loading-spinner" style="display:none;margin-left:1rem;color:#02b2ff;">⏳ Loading...</span>
   </div>
 
   <div class="viz-grid">
@@ -384,27 +385,66 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     const active = await syncActiveFile?.(true);
     if(active) $("active-file-chip").textContent = `Active: ${active}`;
     loadMeta?.();
-   // hydrateAll?.(); // if existed in older versions, harmless otherwise
+    updateVizDatasetMeta?.();
   }catch(e){ console.warn(e); }
+
+  // Utility functions for loading spinner
+  const showSpinner = () => { $("loading-spinner").style.display = "inline"; };
+  const hideSpinner = () => { $("loading-spinner").style.display = "none"; };
+
+  // Util bar buttons
+  $("btn-refresh-meta")?.addEventListener("click", ()=>{ loadMeta?.(); updateVizDatasetMeta?.(); });
+  $("md-report-btn")?.addEventListener("click", downloadMarkdownReport);
+  $("pdf-report-btn")?.addEventListener("click", async ()=>{
+    showSpinner();
+    try { await downloadPdfReport(); }
+    finally { hideSpinner(); }
+  });
+  $("btn-clear-cache")?.addEventListener("click", ()=>{ clearAnalysis?.(); toast("Cache cleared","success"); });
 
   /* Buttons not bound in script.js get bound here */
   const bind = (id,fn)=>$(id)?.addEventListener("click",fn);
 
   bind("viz-auto-explore", async ()=>{
-    const st=$("viz-auto-status"); st.textContent="Running...";
-    try{ await autoExplore(); st.textContent="Done ✓"; ensureCorrelation?.(); renderAINarrative?.(); }
+    const st=$("viz-auto-status"); 
+    showSpinner();
+    st.textContent="Running...";
+    try{ 
+      await autoExplore(); 
+      st.textContent="Done ✓"; 
+      ensureCorrelation?.(); 
+      renderAINarrative?.(); 
+      renderOverview?.();
+      renderValueCounts?.();
+      renderPCA?.();
+      renderKMeans?.();
+      renderAssoc?.();
+      renderSummary?.();
+    }
     catch(err){ st.textContent="Error"; toast(err.message,"error"); }
+    finally { hideSpinner(); }
   });
 
-  bind("btn-refresh-meta", loadMeta);
-  bind("viz-refresh-meta-2", loadMeta);
+  // Quick Insight
+  bind("qi-run", async ()=>{
+    const st = $("qi-status");
+    showSpinner();
+    st.textContent = "Generating...";
+    try {
+      await generateAISummary();
+      st.textContent = "Done ✓";
+    } catch(e) {
+      st.textContent = "Error";
+      toast(e.message, "error");
+    } finally {
+      hideSpinner();
+    }
+  });
 
-  const clear=()=>{ clearAnalysis?.(); ensureCorrelation?.(); renderValueCounts?.(); renderAINarrative?.(); };
-  bind("viz-clear-cache", clear);
-  bind("btn-clear-cache", clear);
+  bind("qi-rerun", ()=>$("qi-run")?.click());
 
   $("corr-scale")?.addEventListener("change", ()=>{
-    if($("#sec-correlation").classList.contains("active")) renderCorrTable?.();
+    if($("sec-correlation")?.classList.contains("active")) renderCorrTable?.();
   });
 
   document.querySelectorAll("[data-vc-mode]").forEach(btn=>{
@@ -443,10 +483,10 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   $("logout-link")?.addEventListener("click", e=>{ e.preventDefault(); logout?.(); });
 
   /* ---- per-section downloads (helpers are defined in script.js v4.6) ---- */
-  bind("dl-vc-png", ()=>exportCanvasPNG?.("vc-canvas","value_counts"));
+  bind("dl-vc-png", ()=>downloadChart?.("vc-canvas","value_counts"));
   bind("dl-vc-csv", exportDataCsv); // VC handled by exportDataCsv
 
-  bind("dl-pca-png", ()=>exportCanvasPNG?.("pca-canvas","pca_scatter"));
+  bind("dl-pca-png", ()=>downloadChart?.("pca-canvas","pca_scatter"));
   bind("dl-pca-csv", ()=>{
     const p=lsGet("pca")||lsGet("autoBundle")?.pca;
     if(!p) return toast("No PCA","warn");
@@ -455,7 +495,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     downloadBlob(new Blob(["idx,pc1,pc2\n"+rows],{type:"text/csv"}),"pca_points.csv");
   });
 
-  bind("dl-km-png", ()=>exportCanvasPNG?.("kmeans-canvas","kmeans"));
+  bind("dl-km-png", ()=>downloadChart?.("kmeans-canvas","kmeans"));
   bind("dl-km-csv", ()=>{
     const km=lsGet("kmeans")||lsGet("autoBundle")?.kmeans;
     if(!km) return toast("No KMeans","warn");
@@ -476,7 +516,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     const sum=lsGet("summary")||lsGet("autoBundle")?.summary;
     if(!sum) return toast("No summary","warn");
     const cols=Object.keys(sum);
-    const stats=[...new Set(cols.flatMap(c=>Object.keys(sum[c])))]
+    const stats=[...new Set(cols.flatMap(c=>Object.keys(sum[c])))];
     const header=["metric",...cols].join(",")+"\n";
     const rows=stats.map(st=>[st,...cols.map(c=>sum[c][st] ?? "")].join(",")).join("\n");
     downloadBlob(new Blob([header+rows],{type:"text/csv"}),"summary_stats.csv");
@@ -489,6 +529,18 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     const md=`## AI Narrative\n\n${j.summary||""}\n\n### Key Points\n${(j.key_points||[]).map(x=>"- "+x).join("\n")}\n\n### Anomalies\n${(j.anomalies||[]).map(x=>"- "+x).join("\n")}\n\n**Recommendation:** ${j.recommendation||""}\n`;
     downloadBlob(new Blob([md],{type:"text/markdown"}),"ai_narrative.md");
   });
+
+  // Column filtering
+  $("viz-columns-filter")?.addEventListener("input", (e) => {
+    const filter = e.target.value.toLowerCase();
+    document.querySelectorAll(".chip-col").forEach(chip => {
+      const show = chip.textContent.toLowerCase().includes(filter);
+      chip.style.display = show ? "inline-block" : "none";
+    });
+  });
+
+  // Initialize overview on load
+  renderOverview?.();
 
 });
 </script>
