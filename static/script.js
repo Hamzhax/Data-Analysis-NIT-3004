@@ -114,101 +114,19 @@ const lsDel  = k => localStorage.removeItem(k);
 /* ---------------- Toast ---------------- */
 function toast(msg,type="info",timeout=3000){
 
-function renderPCA() {
-  const pca = lsGet("pca") || lsGet("autoBundle")?.pca;
-  const km = lsGet("kmeans") || lsGet("autoBundle")?.kmeans;
-  const box = $("pca-box") || $("pca-container");
-  if (!box) return;
-  const comps = pca?.components_2d || pca?.components;
-  if (!comps || !Array.isArray(comps) || comps.length === 0) {
-    box.innerHTML = "<p class='text-small text-dim'>No PCA data.</p>";
-    return;
-  }
-
-  // Find min/max for scaling
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  comps.forEach(([x, y]) => {
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-  });
-  // Add 5% padding
-  const padX = (maxX - minX) * 0.05;
-  const padY = (maxY - minY) * 0.05;
-  minX -= padX; maxX += padX; minY -= padY; maxY += padY;
-
-  // Try to color by cluster if available
-  const labels = km?.labels_preview || km?.labels || [];
-  const hasClusters = labels.length === comps.length;
-  const colors = ["#02b2ff", "#b136ff", "#ffb86c", "#10b981", "#ef4444", "#f59e42", "#7a4bff", "#ff7a7a"];
-  const datasets = hasClusters
-    ? [...new Set(labels)].map((cl, idx) => ({
-        label: "Cluster " + cl,
-        data: comps.map((p, i) => labels[i] === cl ? { x: p[0], y: p[1] } : null).filter(Boolean),
-        backgroundColor: colors[cl % colors.length] + "cc",
-        pointRadius: 4,
-        pointHoverRadius: 7,
-      }))
-    : [{
-        label: "PCA",
-        data: comps.map(p => ({ x: p[0], y: p[1] })),
-        backgroundColor: "#02b2ffcc",
-        pointRadius: 4,
-        pointHoverRadius: 7,
-      }];
-
-  box.innerHTML = "<canvas id='pca-canvas' style='width:100%;height:100%'></canvas>";
-  const ctx = $("pca-canvas").getContext("2d");
-  if (VizCharts.pca) VizCharts.pca.destroy();
-
-  const exp = pca?.explained || pca?.explained_variance || [];
-  VizCharts.pca = new Chart(ctx, {
-    type: "scatter",
-    data: { datasets },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { display: true },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              const d = ctx.raw;
-              let txt = `(${d.x.toFixed(2)}, ${d.y.toFixed(2)})`;
-              if (hasClusters && ctx.dataset.label) txt += ` | ${ctx.dataset.label}`;
-              return txt;
-            }
-          }
-        }
-      },
-      scales: {
-        x: {
-          title: {
-            display: true,
-            text: `PC1${exp[0] ? ` (${(exp[0] * 100).toFixed(1)}%)` : ""}`,
-            color: "#b8c9d6"
-          },
-          min: minX,
-          max: maxX,
-          ticks: { color: getCss('--text-dim') }
-        },
-        y: {
-          title: {
-            display: true,
-            text: `PC2${exp[1] ? ` (${(exp[1] * 100).toFixed(1)}%)` : ""}`,
-            color: "#b8c9d6"
-          },
-          min: minY,
-          max: maxY,
-          ticks: { color: getCss('--text-dim') }
-        }
-      }
-    }
-  });
-  syncExportButtons();
+  // Toast notification
+  let el = document.createElement("div");
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => {
+    el.classList.add("show");
+    setTimeout(() => {
+      el.classList.remove("show");
+      setTimeout(() => el.remove(), 400);
+    }, timeout);
+  }, 10);
 }
-}
-function resetAnalysisCacheOnDatasetChange(newName){
   const prev=localStorage.getItem("filename");
   if(prev && prev!==newName){ LS_KEYS_TO_CLEAR.forEach(lsDel); }
   localStorage.setItem("filename",newName);
@@ -1103,5 +1021,5 @@ async function inferColumnTypes() {
   } catch (e) {
     console.error("Error inferring column types:", e);
   }
-}
+// End of file
 }
