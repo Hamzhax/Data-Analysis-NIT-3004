@@ -1,3 +1,22 @@
+// --- Logout function ---
+async function logout() {
+  try { await handleApi("/api/logout", { method: "POST" }); } catch {}
+  localStorage.clear(); window.location.href = "login.html";
+}
+
+// --- Sync active file across pages ---
+async function syncActiveFile(force = false) {
+  if (!force && localStorage.getItem("filename")) return localStorage.getItem("filename");
+  try {
+    const r = await handleApi("/api/files");
+    const active = r.active || localStorage.getItem("filename");
+    if (active) {
+      localStorage.setItem("filename", active);
+      localStorage.setItem("activeFile", active);
+    }
+    return active;
+  } catch (e) { console.warn("syncActiveFile", e); return null; }
+}
 // --- Ensure Auth for Protected Pages ---
 async function ensureAuthForProtectedPages() {
   const pages = ["dashboard", "analysis", "visualization", "admin", "upload", "preview"];
@@ -30,8 +49,8 @@ async function handleApi(path, opts = {}) {
   if (!res.ok || js.status === "error") throw new Error(js.error || `HTTP ${res.status}`);
   return js;
 }
+// --- Global loadMeta for dashboard/visualization ---
 (function(){
-  // Add global loadMeta for visualization.html and other pages that expect it
   if(typeof window.loadMeta !== "function"){
     window.loadMeta = function loadMeta() {
       const chip = document.getElementById("active-file-chip");
@@ -41,6 +60,19 @@ async function handleApi(path, opts = {}) {
       if (metaBox) metaBox.textContent = filename ? filename : "No active dataset.";
     };
   }
+
+  // --- Force auth check on page load for all protected pages ---
+  document.addEventListener("DOMContentLoaded", async () => {
+    const protectedPages = ["dashboard", "analysis", "visualization", "admin", "upload", "preview"];
+    const page = document.body.getAttribute("data-page");
+    if (protectedPages.includes(page)) {
+      try {
+        await ensureAuthForProtectedPages();
+      } catch {
+        window.location.href = "login.html";
+      }
+    }
+  });
 })();
 /* =========================================================
    Global Frontend Script – Data Mining & Visualization Suite (v4.6 FINAL)
