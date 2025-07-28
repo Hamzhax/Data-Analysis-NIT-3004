@@ -898,12 +898,30 @@ function renderKMeans(){
   box.innerHTML="<canvas id='kmeans-canvas' style='width:100%;height:100%'></canvas>";
   const ctx=$("kmeans-canvas").getContext("2d");
   if(VizCharts.kmeans) VizCharts.kmeans.destroy();
-  VizCharts.kmeans=new Chart(ctx,{type:"scatter",
-    data:{datasets:Object.entries(clusters).map(([lab,pts],i)=>({label:`Cluster ${lab}`,data:pts,backgroundColor:colors[i%colors.length]}))},
-    options:{responsive:true,plugins:{legend:{display:true}},
-      scales:{
-        x:{min:minX,max:maxX,ticks:{color:getCss('--text-dim')},title:{display:true,text:"Component 1"}},
-        y:{min:minY,max:maxY,ticks:{color:getCss('--text-dim')},title:{display:true,text:"Component 2"}}
+
+  const datasets = Object.keys(clusters).map((clusterId, idx) => ({
+    label: `Cluster ${clusterId}`,
+    data: clusters[clusterId].map(p => ({x: p.x, y: p.y})),
+    backgroundColor: colors[idx % colors.length],
+    borderColor: colors[idx % colors.length],
+    borderWidth: 1,
+    pointRadius: 3,
+    pointHoverRadius: 5
+  }));
+
+  VizCharts.kmeans = new Chart(ctx, {
+    type: 'scatter',
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: { display: true, text: `K-Means Clustering (k=${km.k || '?'})` },
+        legend: { display: true, position: 'top' }
+      },
+      scales: {
+        x: { type: 'linear', position: 'bottom', title: { display: true, text: 'Component 1' }, min: minX, max: maxX },
+        y: { title: { display: true, text: 'Component 2' }, min: minY, max: maxY }
       }
     }
   });
@@ -958,6 +976,12 @@ function renderAINarrative(){
   const raw = lsGet("autoAI") || lsGet("lastAI");
   if(!raw){
     box.innerHTML = "<p class='text-small text-dim'>No AI narrative yet.</p>";
+    return;
+  }
+
+  // Handle error cases
+  if(raw.error) {
+    box.innerHTML = `<p class='text-small text-dim'>AI analysis encountered an error: ${raw.error}</p>`;
     return;
   }
 

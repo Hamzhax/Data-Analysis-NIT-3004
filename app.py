@@ -158,6 +158,14 @@ def slim_bundle(bundle):
     # Association rules
     if "assoc_rules" in out and len(out["assoc_rules"]) > 100:
         out["assoc_rules"] = out["assoc_rules"][:100]
+    
+    # PCA - keep all data, it's already limited to 300 points
+    if "pca" in bundle:
+        out["pca"] = bundle["pca"]
+    
+    # K-means - keep all data, it's already limited to 300 points  
+    if "kmeans" in bundle:
+        out["kmeans"] = bundle["kmeans"]
 
     return out
 
@@ -894,8 +902,11 @@ def build_auto_bundle(filename):
                 # Get 2D components for visualization - use PCA result if available
                 components_2d = None
                 if pca_result and "components_2d" in pca_result:
-                    # Use the same subset of data that PCA used
-                    components_2d = pca_result["components_2d"][:len(best_model.labels_)]
+                    # Use the same subset of data that PCA used, but match kmeans length
+                    pca_components = pca_result["components_2d"]
+                    # Ensure we match the length of K-means labels
+                    min_len = min(len(pca_components), len(best_model.labels_))
+                    components_2d = pca_components[:min_len]
                 elif nd.shape[1] >= 2:
                     # Create 2D projection for visualization if no PCA
                     from sklearn.decomposition import PCA
@@ -910,9 +921,13 @@ def build_auto_bundle(filename):
                     "columns": nd.columns.tolist()
                 }
                 
-                # Add 2D components if available
+                # Add 2D components if available and ensure length consistency
                 if components_2d:
-                    kmeans_result["components_2d"] = components_2d[:300]  # Match labels_preview length
+                    # Make sure components_2d matches the length of labels_preview
+                    max_len = min(len(components_2d), 300)
+                    kmeans_result["components_2d"] = components_2d[:max_len]
+                    # Also trim labels_preview to match
+                    kmeans_result["labels_preview"] = best_model.labels_[:max_len].tolist()
                     
         except Exception:
             kmeans_result = None
