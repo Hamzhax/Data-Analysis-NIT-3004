@@ -1,3 +1,15 @@
+(function(){
+  // Add global loadMeta for visualization.html and other pages that expect it
+  if(typeof window.loadMeta !== "function"){
+    window.loadMeta = function loadMeta() {
+      const chip = document.getElementById("active-file-chip");
+      const metaBox = document.getElementById("viz-dataset-meta");
+      const filename = localStorage.getItem("filename");
+      if (chip) chip.textContent = filename ? `Active: ${filename}` : "Active: —";
+      if (metaBox) metaBox.textContent = filename ? filename : "No active dataset.";
+    };
+  }
+})();
 /* =========================================================
    Global Frontend Script – Data Mining & Visualization Suite (v4.6 FINAL)
    =========================================================
