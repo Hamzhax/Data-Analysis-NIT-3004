@@ -1,3 +1,35 @@
+// --- Ensure Auth for Protected Pages ---
+async function ensureAuthForProtectedPages() {
+  const pages = ["dashboard", "analysis", "visualization", "admin", "upload", "preview"];
+  const page = document.body.getAttribute("data-page");
+  if (!pages.includes(page)) return;
+  try {
+    const me = await handleApi("/api/me");
+    lsSet("currentUser", me.user); lsSet("role", me.role);
+    if (me.role !== "admin") {
+      document.querySelectorAll(".admin-link, a[href='admin.html']").forEach(a => a.style.display = "none");
+    }
+    $("role-badge") && ($("role-badge").textContent = me.role.toUpperCase());
+  } catch (e) {
+    toast("Session expired. Please login.", "warn");
+    setTimeout(() => window.location.href = "login.html", 600);
+  }
+}
+
+// --- Robust Fetch Wrapper ---
+async function handleApi(path, opts = {}) {
+  const init = {
+    method: (opts.method || "GET").toUpperCase(),
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...(opts.headers || {}) }
+  };
+  if (opts.body) init.body = typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
+  const res = await fetch(BASE_URL + path, init);
+  let js = {};
+  try { js = await res.json(); } catch {}
+  if (!res.ok || js.status === "error") throw new Error(js.error || `HTTP ${res.status}`);
+  return js;
+}
 (function(){
   // Add global loadMeta for visualization.html and other pages that expect it
   if(typeof window.loadMeta !== "function"){
