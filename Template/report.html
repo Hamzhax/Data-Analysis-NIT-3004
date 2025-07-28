@@ -28,88 +28,36 @@
 <h1>Data Mining Report</h1>
 <p class="muted">{{ today }} • File: <strong>{{ filename }}</strong> • NIT 3004 H2B1</p>
 
+
 <div class="section">
   <h2>1. Dataset Overview</h2>
-  <p class="small">Core meta information from Auto Explore.</p>
+  <p class="small">Core meta information from Auto Explore. Includes row/column counts, data type breakdown, and column names.</p>
   {% if meta %}
     <span class="badge">{{ meta.rows or "?" }} rows</span>
     <span class="badge">{{ meta.columns or "?" }} cols</span>
     <span class="badge">{{ meta.numeric_cols or "?" }} numeric</span>
     <span class="badge">{{ meta.categorical_cols or "?" }} categorical</span>
-  {% else %}
-    <p>No meta captured.</p>
-  {% endif %}
-</div>
-
-<div class="section">
-  <h2>2. AI Narrative</h2>
-  {% if ai %}
-    <div class="ai-block">
-      {% if ai.summary %}<p><strong>Summary:</strong> {{ ai.summary }}</p>{% endif %}
-      {% if ai.key_points %}
-        <p><strong>Key Points</strong></p>
-        <ul>{% for k in ai.key_points %}<li>{{ k }}</li>{% endfor %}</ul>
-      {% endif %}
-      {% if ai.anomalies %}
-        <p><strong>Anomalies</strong></p>
-        <ul>{% for a in ai.anomalies %}<li>{{ a }}</li>{% endfor %}</ul>
-      {% endif %}
-      {% if ai.recommendation %}<p><strong>Recommendation:</strong> {{ ai.recommendation }}</p>{% endif %}
-    </div>
-  {% else %}
-    <p>No AI insight generated.</p>
-  {% endif %}
-</div>
-
-<div class="pagebreak"></div>
-
-<div class="section">
-  <h2>3. Value Counts</h2>
-  {% if charts.value_counts %}
-    <img src="{{ charts.value_counts }}" alt="Value Counts Chart">
-  {% endif %}
-  {% if vc.labels %}
-    <table>
-      <thead><tr><th>Label</th><th>Count</th></tr></thead>
-      <tbody>
-        {% for l,v in vc.labels|zip(vc.values) %}
-          <tr><td>{{ l }}</td><td>{{ v }}</td></tr>
-        {% endfor %}
-      </tbody>
-<body>
-
-<h1>Data Mining & Visualization Report</h1>
-<p class="muted">Generated: {{ today }} &nbsp; | &nbsp; File: <strong>{{ filename }}</strong> &nbsp; | &nbsp; NIT 3004 H2B1</p>
-
-<div class="section">
-  <h2>1. Dataset Overview</h2>
-  <p class="small">Summary of the dataset as detected during Auto Explore.</p>
-  {% if meta %}
-    <div class="cards-grid">
-      <div class="card"><h4>Rows</h4><p>{{ meta.rows or "?" }}</p></div>
-      <div class="card"><h4>Columns</h4><p>{{ meta.columns or "?" }}</p></div>
-      <div class="card"><h4>Numeric Columns</h4><p>{{ meta.numeric_cols or "?" }}</p></div>
-      <div class="card"><h4>Categorical Columns</h4><p>{{ meta.categorical_cols or "?" }}</p></div>
-    </div>
     {% if meta.columns_list %}
-      <p class="small"><strong>Columns:</strong> {{ meta.columns_list|join(", ") }}</p>
+      <div class="small" style="margin-top:6px;"><strong>Columns:</strong> {{ meta.columns_list|join(", ") }}</div>
     {% endif %}
   {% else %}
     <p>No meta captured.</p>
   {% endif %}
 </div>
 
+
 <div class="section">
   <h2>2. AI Narrative</h2>
+  <p class="small">Automated AI-generated summary, key findings, anomalies, and recommendations for your dataset. This section provides a high-level, human-readable interpretation of the data.</p>
   {% if ai %}
     <div class="ai-block">
       {% if ai.summary %}<p><strong>Summary:</strong> {{ ai.summary }}</p>{% endif %}
       {% if ai.key_points %}
-        <p><strong>Key Points</strong></p>
+        <p><strong>Key Points:</strong></p>
         <ul>{% for k in ai.key_points %}<li>{{ k }}</li>{% endfor %}</ul>
       {% endif %}
       {% if ai.anomalies %}
-        <p><strong>Anomalies</strong></p>
+        <p><strong>Anomalies:</strong></p>
         <ul>{% for a in ai.anomalies %}<li>{{ a }}</li>{% endfor %}</ul>
       {% endif %}
       {% if ai.recommendation %}<p><strong>Recommendation:</strong> {{ ai.recommendation }}</p>{% endif %}
@@ -121,13 +69,14 @@
 
 <div class="pagebreak"></div>
 
+
 <div class="section">
   <h2>3. Value Counts</h2>
-  <p class="small">Distribution of top categorical values in the dataset.</p>
+  <p class="small">Distribution of categorical values (top categories shown below). This helps identify dominant categories and class imbalance.</p>
   {% if charts.value_counts %}
     <img src="{{ charts.value_counts }}" alt="Value Counts Chart">
   {% endif %}
-  {% if vc.labels %}
+  {% if vc and vc.labels %}
     <table>
       <thead><tr><th>Label</th><th>Count</th></tr></thead>
       <tbody>
@@ -141,21 +90,19 @@
   {% endif %}
 </div>
 
+
 <div class="section">
-  <h2>4. Correlation Matrix</h2>
-  <p class="small">Top 10 strongest correlations between numeric columns.</p>
-  {% if charts.correlation %}
-    <img src="{{ charts.correlation }}" alt="Correlation Heatmap">
-  {% endif %}
+  <h2>4. Correlation Matrix (Top 10 pairs)</h2>
+  <p class="small">Top 10 strongest correlations between numeric columns (Pearson's r). This helps identify relationships and multicollinearity in your data.</p>
   {% if top_corr %}
-    <table>
-      <thead><tr><th>Col A</th><th>Col B</th><th>|r|</th><th>r</th></tr></thead>
-      <tbody>
-        {% for a,b,absr,r in top_corr %}
-          <tr><td>{{ a }}</td><td>{{ b }}</td><td>{{ '%.4f' % absr }}</td><td>{{ '%.4f' % r }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <table>
+    <thead><tr><th>Col A</th><th>Col B</th><th>r</th></tr></thead>
+    <tbody>
+      {% for a,b,absr,r in top_corr %}
+        <tr><td>{{ a }}</td><td>{{ b }}</td><td>{{ '%.4f' % r }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
   {% else %}
     <p>No correlation found.</p>
   {% endif %}
@@ -163,40 +110,10 @@
 
 <div class="pagebreak"></div>
 
-<div class="section">
-  <h2>5. Summary Statistics</h2>
-  <p class="small">Descriptive statistics for each numeric column.</p>
-  {% if summary %}
-    <table>
-      <thead>
-        <tr>
-          <th>Metric</th>
-          {% for col in summary.keys() %}<th>{{ col }}</th>{% endfor %}
-        </tr>
-      </thead>
-      <tbody>
-        {% set stats = [] %}
-        {% for col,vals in summary.items() %}
-          {% for stat in vals.keys() %}
-            {% if stat not in stats %}{% set _ = stats.append(stat) %}{% endif %}
-          {% endfor %}
-        {% endfor %}
-        {% for stat in stats %}
-          <tr>
-            <td>{{ stat }}</td>
-            {% for col in summary.keys() %}<td>{{ summary[col][stat] or "" }}</td>{% endfor %}
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <p>No summary statistics available.</p>
-  {% endif %}
-</div>
 
 <div class="section">
-  <h2>6. PCA (Principal Component Analysis)</h2>
-  <p class="small">Scatter plot of the first two principal components and explained variance.</p>
+  <h2>5. PCA (Principal Component Analysis)</h2>
+  <p class="small">PCA reduces dimensionality and visualizes the main variance in your data. The scatter plot shows the first two principal components, and the table shows explained variance for each component.</p>
   {% if charts.pca %}
     <img src="{{ charts.pca }}" alt="PCA Scatter">
   {% endif %}
@@ -212,9 +129,10 @@
   {% endif %}
 </div>
 
+
 <div class="section">
-  <h2>7. KMeans Clustering</h2>
-  <p class="small">Cluster assignments and cluster centers (if available).</p>
+  <h2>6. KMeans Clustering</h2>
+  <p class="small">KMeans clustering groups data into clusters. The scatter plot shows clusters in PCA space, and the table lists cluster centers for each dimension.</p>
   {% if charts.kmeans %}
     <img src="{{ charts.kmeans }}" alt="KMeans">
   {% endif %}
@@ -224,36 +142,74 @@
         <tr><th>Cluster</th>{% for col in kmeans.columns or [] %}<th>{{ col }}</th>{% endfor %}</tr>
       </thead>
       <tbody>
-        {% for i,center in enumerate(kmeans.centers) %}
-          <tr><td>{{ i }}</td>{% for v in center %}<td>{{ v }}</td>{% endfor %}</tr>
+        {% for center in kmeans.centers %}
+          <tr><td>{{ loop.index0 }}</td>
+          {% for val in center %}<td>{{ '%.4f' % val if val is number else val }}</td>{% endfor %}
+          </tr>
         {% endfor %}
       </tbody>
     </table>
   {% endif %}
 </div>
 
+
 <div class="section">
-  <h2>8. Association Rules (Top 50)</h2>
-  <p class="small">Frequent itemsets and discovered rules.</p>
+  <h2>7. Association Rules (Top 50)</h2>
+  <p class="small">Top 50 association rules discovered (antecedents, consequents, and metrics). These rules help uncover relationships between categorical variables.</p>
   {% if assoc %}
     <table>
       <thead><tr><th>Antecedents</th><th>Consequents</th><th>Support</th><th>Confidence</th><th>Lift</th></tr></thead>
       <tbody>
         {% for r in assoc[:50] %}
           <tr>
-            <td>{{ r.antecedents|join(", ") }}</td>
-            <td>{{ r.consequents|join(", ") }}</td>
-            <td>{{ '%.4f' % r.support }}</td>
-            <td>{{ '%.4f' % r.confidence }}</td>
-            <td>{{ '%.4f' % r.lift }}</td>
+            <td>{{ r.antecedents if r.antecedents is string else (r.antecedents|join(', ')) }}</td>
+            <td>{{ r.consequents if r.consequents is string else (r.consequents|join(', ')) }}</td>
+            <td>{{ '%.3f' % (r.support or 0) }}</td>
+            <td>{{ '%.3f' % (r.confidence or 0) }}</td>
+            <td>{{ '%.3f' % (r.lift or 0) }}</td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
   {% else %}
-    <p>No association rules found.</p>
+    <p>No rules available.</p>
   {% endif %}
 </div>
+
+
+<div class="section">
+  <h2>8. Summary Statistics</h2>
+  <p class="small">Descriptive statistics for all numeric columns (mean, std, min, max, etc). This section provides a detailed breakdown for each column.</p>
+  {% if summary %}
+    <table>
+      <thead>
+        <tr><th>Metric</th>{% for col in summary.keys() %}<th>{{ col }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% set metrics = [] %}
+        {% for col,stats in summary.items() %}
+          {% for m,v in stats.items() %}
+            {% if m not in metrics %}{% set _ = metrics.append(m) %}{% endif %}
+          {% endfor %}
+        {% endfor %}
+        {% for m in metrics %}
+          <tr><th>{{ m }}</th>
+            {% for col,stats in summary.items() %}
+              {% set v = stats.get(m,'') %}
+              <td>{{ v }}</td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>No summary stats cached.</p>
+  {% endif %}
+</div>
+
+<div class="section">
+  <h2>Appendix</h2>
+  <p class="small">Raw JSON dump (trimmed) can be provided if needed. (Disabled by default).</p>
 </div>
 
 </body>

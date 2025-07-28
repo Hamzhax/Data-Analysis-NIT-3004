@@ -1,79 +1,59 @@
-// --- Logout function ---
-async function logout() {
-  try { await handleApi("/api/logout", { method: "POST" }); } catch {}
-  localStorage.clear(); window.location.href = "login.html";
-}
-
-// --- Sync active file across pages ---
-async function syncActiveFile(force = false) {
-  if (!force && localStorage.getItem("filename")) return localStorage.getItem("filename");
+// --- Redirect to login if not authenticated (on any page load) ---
+document.addEventListener("DOMContentLoaded", async () => {
   try {
-    const r = await handleApi("/api/files");
-    const active = r.active || localStorage.getItem("filename");
-    if (active) {
-      localStorage.setItem("filename", active);
-      localStorage.setItem("activeFile", active);
-    }
-    return active;
-  } catch (e) { console.warn("syncActiveFile", e); return null; }
-}
-// --- Ensure Auth for Protected Pages ---
-async function ensureAuthForProtectedPages() {
-  const pages = ["dashboard", "analysis", "visualization", "admin", "upload", "preview"];
-  const page = document.body.getAttribute("data-page");
-  if (!pages.includes(page)) return;
-  try {
-    const me = await handleApi("/api/me");
-    lsSet("currentUser", me.user); lsSet("role", me.role);
-    if (me.role !== "admin") {
-      document.querySelectorAll(".admin-link, a[href='admin.html']").forEach(a => a.style.display = "none");
-    }
-    $("role-badge") && ($("role-badge").textContent = me.role.toUpperCase());
+    await ensureAuthForProtectedPages();
   } catch (e) {
-    toast("Session expired. Please login.", "warn");
-    setTimeout(() => window.location.href = "login.html", 600);
+    window.location.href = "login.html";
+  }
+});
+
+// --- Global helpers for dashboard/visualization ---
+if (!window.$) window.$ = (id) => document.getElementById(id);
+if (!window.toast) window.toast = (msg, type = "info") => console.log("[toast]", type, msg);
+if (!window.lsGet) window.lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
+if (!window.lsSet) window.lsSet = (k, v) => { try { localStorage.setItem(k, typeof v === "string" ? v : JSON.stringify(v)); } catch {} };
+if (!window.lsDel) window.lsDel = (k) => localStorage.removeItem(k);
+if (!window.logout) window.logout = function logout() { localStorage.clear(); window.location.href = "login.html"; };
+if (!window.downloadBlob) window.downloadBlob = function downloadBlob(blob, filename) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1500); };
+if (!window.cleanAIBlock) window.cleanAIBlock = function cleanAIBlock(objOrStr) { if (typeof objOrStr === "string") { try { return JSON.parse(objOrStr); } catch { return { summary: objOrStr }; } } if (!objOrStr || typeof objOrStr !== "object") return objOrStr; return { summary: objOrStr.summary ?? objOrStr.overview ?? "", key_points: Array.isArray(objOrStr.key_points || objOrStr.key_findings) ? (objOrStr.key_points || objOrStr.key_findings) : [], anomalies: Array.isArray(objOrStr.anomalies) ? objOrStr.anomalies : [], recommendation: objOrStr.recommendation ?? "", next_steps: Array.isArray(objOrStr.next_steps) ? objOrStr.next_steps : [] }; };
+
+// --- Make syncActiveFile globally available ---
+window.syncActiveFile = syncActiveFile;
+window.handleApi = handleApi;
+window.ensureAuthForProtectedPages = ensureAuthForProtectedPages;
+window.uploadDataset = uploadDataset;
+window.fetchFromInternet = fetchFromInternet;
+window.smartSearch = smartSearch;
+window.applyCleaning = applyCleaning;
+window.inferColumnTypes = inferColumnTypes;
+window.downloadMarkdownReport = downloadMarkdownReport;
+window.downloadPdfReport = downloadPdfReport;
+window.downloadChart = downloadChart;
+window.exportDataCsv = exportDataCsv;
+window.renderOverview = renderOverview;
+window.renderAINarrative = renderAINarrative;
+window.renderPCA = renderPCA;
+window.renderKMeans = renderKMeans;
+window.renderValueCounts = renderValueCounts;
+window.renderCorrTable = renderCorrTable;
+window.renderAssoc = typeof renderAssoc !== 'undefined' ? renderAssoc : function(){};
+window.renderSummary = typeof renderSummary !== 'undefined' ? renderSummary : function(){};
+window.ensureCorrelation = ensureCorrelation;
+window.generateAISummary = generateAISummary;
+window.clearAnalysis = clearAnalysis;
+window.adminLoadUsers = adminLoadUsers;
+window.updateVizDatasetMeta = updateVizDatasetMeta;
+window.loadMeta = typeof loadMeta !== 'undefined' ? loadMeta : function(){};
+
+// --- Fallback for BASE_URL if not set ---
+if (!window.BASE_URL) {
+  const origin = window.location.origin;
+  if (origin.includes("onrender.com")) {
+    window.BASE_URL = origin;
+  } else {
+    window.BASE_URL = "http://127.0.0.1:5050";
   }
 }
-
-// --- Robust Fetch Wrapper ---
-async function handleApi(path, opts = {}) {
-  const init = {
-    method: (opts.method || "GET").toUpperCase(),
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(opts.headers || {}) }
-  };
-  if (opts.body) init.body = typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
-  const res = await fetch(BASE_URL + path, init);
-  let js = {};
-  try { js = await res.json(); } catch {}
-  if (!res.ok || js.status === "error") throw new Error(js.error || `HTTP ${res.status}`);
-  return js;
-}
-// --- Global loadMeta for dashboard/visualization ---
-(function(){
-  if(typeof window.loadMeta !== "function"){
-    window.loadMeta = function loadMeta() {
-      const chip = document.getElementById("active-file-chip");
-      const metaBox = document.getElementById("viz-dataset-meta");
-      const filename = localStorage.getItem("filename");
-      if (chip) chip.textContent = filename ? `Active: ${filename}` : "Active: —";
-      if (metaBox) metaBox.textContent = filename ? filename : "No active dataset.";
-    };
-  }
-
-  // --- Force auth check on page load for all protected pages ---
-  document.addEventListener("DOMContentLoaded", async () => {
-    const protectedPages = ["dashboard", "analysis", "visualization", "admin", "upload", "preview"];
-    const page = document.body.getAttribute("data-page");
-    if (protectedPages.includes(page)) {
-      try {
-        await ensureAuthForProtectedPages();
-      } catch {
-        window.location.href = "login.html";
-      }
-    }
-  });
-})();
 /* =========================================================
    Global Frontend Script – Data Mining & Visualization Suite (v4.6 FINAL)
    =========================================================
@@ -98,7 +78,7 @@ if (!BASE_URL) {
   } else {
     BASE_URL = "http://127.0.0.1:5050"; // local dev
   }
-// End of renderPCA
+}
 window.BASE_URL = BASE_URL;
 
 const LS_KEYS_TO_CLEAR = [
@@ -113,20 +93,82 @@ const lsDel  = k => localStorage.removeItem(k);
 
 /* ---------------- Toast ---------------- */
 function toast(msg,type="info",timeout=3000){
-
-  // Toast notification
-  let el = document.createElement("div");
-  el.className = `toast toast-${type}`;
-  el.textContent = msg;
-  document.body.appendChild(el);
-  setTimeout(() => {
-    el.classList.add("show");
-    setTimeout(() => {
-      el.classList.remove("show");
-      setTimeout(() => el.remove(), 400);
-    }, timeout);
-  }, 10);
+  let wrap=$("toast-wrap");
+  if(!wrap){
+    wrap=document.createElement("div");
+    wrap.id="toast-wrap";
+    wrap.style.cssText="position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:.5rem;align-items:flex-end;";
+    document.body.appendChild(wrap);
+  }
+  const icons = {
+    error: "⛔️", success: "✅", warn: "⚠️", info: "ℹ️"
+  };
+  const card=document.createElement("div");
+  card.innerHTML = `<span style="margin-right:.5em">${icons[type]||""}</span>${msg}`;
+  card.style.cssText=`
+    font:500 .7rem/1.35 Inter,system-ui,sans-serif;
+    background:${type==="error"?"#3b1217":type==="success"?"#123b2a":type==="warn"?"#3b2f12":"#162235"};
+    border:1px solid ${type==="error"?"#ef4444":type==="success"?"#10b981":type==="warn"?"#f59e0b":"#2c425a"};
+    color:#e2e8f0;padding:.55rem .75rem;border-radius:10px;
+    box-shadow:0 4px 20px -6px rgba(0,0,0,.55);
+    backdrop-filter:blur(6px);opacity:0;transform:translateY(6px);
+    transition:opacity .35s,transform .35s;`;
+  wrap.appendChild(card);
+  requestAnimationFrame(()=>{card.style.opacity=1;card.style.transform="translateY(0)";});
+  setTimeout(()=>{card.style.opacity=0;card.style.transform="translateY(6px)";setTimeout(()=>wrap.removeChild(card),350);},timeout);
 }
+
+/* ---------------- Fetch wrapper ---------------- */
+async function handleApi(path,opts={}){
+  const init={
+    method:(opts.method||"GET").toUpperCase(),
+    credentials:"include",
+    headers:{"Content-Type":"application/json",...(opts.headers||{})}
+  };
+  if(opts.body) init.body=typeof opts.body==="string"?opts.body:JSON.stringify(opts.body);
+  const res=await fetch(BASE_URL+path,init);
+  let js={};
+  try{ js=await res.json(); }catch{}
+  if(!res.ok || js.status==="error") throw new Error(js.error||`HTTP ${res.status}`);
+  return js;
+}
+
+/* ---------------- Auth ---------------- */
+async function logout(){
+  try{await handleApi("/api/logout",{method:"POST"});}catch{}
+  localStorage.clear(); window.location.href="login.html";
+}
+async function ensureAuthForProtectedPages(){
+  const pages=["dashboard","analysis","visualization","admin","upload","preview"];
+  const page=document.body.getAttribute("data-page");
+  if(!pages.includes(page)) return;
+  try{
+    const me=await handleApi("/api/me");
+    lsSet("currentUser",me.user); lsSet("role",me.role);
+    if(me.role!=="admin"){
+      document.querySelectorAll(".admin-link, a[href='admin.html']").forEach(a=>a.style.display="none");
+    }
+    $("role-badge") && ($("role-badge").textContent=me.role.toUpperCase());
+  }catch(e){
+    toast("Session expired. Please login.","warn");
+    setTimeout(()=>window.location.href="login.html",600);
+  }
+}
+
+/* ---------------- Active dataset sync ---------------- */
+async function syncActiveFile(force=false){
+  if(!force && localStorage.getItem("filename")) return localStorage.getItem("filename");
+  try{
+    const r=await handleApi("/api/files");
+    const active=r.active||localStorage.getItem("filename");
+    if(active){
+      localStorage.setItem("filename",active);
+      localStorage.setItem("activeFile",active);
+    }
+    return active;
+  }catch(e){ console.warn("syncActiveFile",e); return null; }
+}
+function resetAnalysisCacheOnDatasetChange(newName){
   const prev=localStorage.getItem("filename");
   if(prev && prev!==newName){ LS_KEYS_TO_CLEAR.forEach(lsDel); }
   localStorage.setItem("filename",newName);
@@ -188,127 +230,97 @@ async function smartSearch(){
     if(resBox){
       resBox.innerHTML=(data.links||[]).length
         ? data.links.map(l=>`<div><a href="#" onclick="fetchFromInternet('${l}')">${l}</a></div>`).join("")
-        : "No results found.";
+        : "<em>No CSV links found.</em>";
     }
     st&&(st.textContent="Done");
-  }catch(e){
-    st&&(st.textContent="Search failed");
-    toast("Search error: "+(e.message||"Unknown error"),"error");
-  }
+  }catch(e){ st&&(st.textContent="Error"); toast("Search error: "+e.message,"error"); }
 }
 
-function renderKMeans() {
-  const km = lsGet("kmeans") || lsGet("autoBundle")?.kmeans;
-  const pca = lsGet("pca") || lsGet("autoBundle")?.pca;
-  const box = $("kmeans-box") || $("kmeans-container");
-  if (!box) return;
-  const labels = km?.labels_preview || km?.labels;
-  if (!labels || !Array.isArray(labels) || labels.length === 0) {
-    box.innerHTML = "<p class='text-small text-dim'>No clustering data.</p>";
-    return;
-  }
-
-  // Use PCA for 2D plotting if available
-  const comps = pca?.components_2d;
-  if (!comps || comps.length !== labels.length) {
-    // fallback: 1D cluster plot
-    const pts = labels.map((lab, i) => ({ x: i, y: lab }));
-    // Find min/max for scaling
-    let minX = 0, maxX = labels.length - 1, minY = Math.min(...labels), maxY = Math.max(...labels);
-    const padX = (maxX - minX) * 0.05;
-    const padY = (maxY - minY) * 0.05;
-    minX -= padX; maxX += padX; minY -= padY; maxY += padY;
-    box.innerHTML = "<canvas id='kmeans-canvas' style='width:100%;height:100%'></canvas>";
-    const ctx = $("kmeans-canvas").getContext("2d");
-    if (VizCharts.kmeans) VizCharts.kmeans.destroy();
-    VizCharts.kmeans = new Chart(ctx, {
-      type: "scatter",
-      data: { datasets: [{ label: "Clusters", data: pts, backgroundColor: "#b136ffcc" }] },
-      options: {
-        responsive: true,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { min: minX, max: maxX, title: { display: true, text: "Index", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } },
-          y: { min: minY, max: maxY, title: { display: true, text: "Cluster", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } }
-        }
-      }
-    });
-    syncExportButtons();
-    return;
-  }
-
-  // 2D cluster plot in PCA space
-  // Find min/max for scaling
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  comps.forEach(([x, y]) => {
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-  });
-  const padX = (maxX - minX) * 0.05;
-  const padY = (maxY - minY) * 0.05;
-  minX -= padX; maxX += padX; minY -= padY; maxY += padY;
-
-  const colors = ["#02b2ff", "#b136ff", "#ffb86c", "#10b981", "#ef4444", "#f59e42", "#7a4bff", "#ff7a7a"];
-  const clusters = [...new Set(labels)];
-  const datasets = clusters.map((cl, idx) => ({
-    label: "Cluster " + cl,
-    data: comps.map((p, i) => labels[i] === cl ? { x: p[0], y: p[1] } : null).filter(Boolean),
-    backgroundColor: colors[cl % colors.length] + "cc",
-    pointRadius: 4,
-    pointHoverRadius: 7,
-  }));
-
-  // Cluster centers (if available)
-  let centers = [];
-  if (km?.centers && km.centers[0].length >= 2) {
-    centers = km.centers.map((c, i) => ({
-      x: c[0], y: c[1], cluster: i
-    }));
-    datasets.push({
-      label: "Centers",
-      data: centers,
-      backgroundColor: "#fff",
-      borderColor: "#000",
-      pointRadius: 8,
-      pointStyle: "rectRot",
-      showLine: false
-    });
-  }
-
-  box.innerHTML = "<canvas id='kmeans-canvas' style='width:100%;height:100%'></canvas>";
-  const ctx = $("kmeans-canvas").getContext("2d");
-  if (VizCharts.kmeans) VizCharts.kmeans.destroy();
-
-  VizCharts.kmeans = new Chart(ctx, {
-    type: "scatter",
-    data: { datasets },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { display: true },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              const d = ctx.raw;
-              let txt = `(${d.x.toFixed(2)}, ${d.y.toFixed(2)})`;
-              if (ctx.dataset.label && ctx.dataset.label.startsWith("Cluster")) txt += ` | ${ctx.dataset.label}`;
-              if (ctx.dataset.label === "Centers") txt += " (center)";
-              return txt;
-            }
-          }
-        }
-      },
-      scales: {
-        x: { min: minX, max: maxX, title: { display: true, text: "PC1", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } },
-        y: { min: minY, max: maxY, title: { display: true, text: "PC2", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } }
-      }
+/* ---------------- Cleaning ---------------- */
+async function applyCleaning(){
+  const f=localStorage.getItem("filename"); if(!f){ toast("No dataset","warn"); return; }
+  const body={
+    filename:f,
+    remove_duplicates:$("remove-duplicates")?.checked,
+    drop_na:$("drop-na")?.checked,
+    fill_value:$("fill-value")?.value||null
+  };
+  try{
+    $("clean-status")&&( $("clean-status").textContent="Cleaning...");
+    const res = await handleApi("/api/clean",{method:"POST",body});
+    if(res.message === "already_clean"){
+      $("clean-status")&&( $("clean-status").textContent="Already clean");
+      toast("Dataset is already clean","info");
+    } else {
+      $("clean-status")&&( $("clean-status").textContent="Cleaned ✓");
+      toast("Cleaning applied","success");
     }
-  });
-  syncExportButtons();
+    await previewDataset(); inferColumnTypes();
+  }catch(e){
+    $("clean-status")&&( $("clean-status").textContent="Failed");
+    toast("Clean error: "+e.message,"error");
+  }
 }
 
+/* ---------------- Analyses ---------------- */
+async function runAnalysis(){
+  const m=$("analysis-method")?.value;
+  const column=$("column-name")?.value?.trim() || $("column-select")?.value?.trim();
+  const k=parseInt($("cluster-k")?.value||"3",10);
+  if(!m){ toast("Choose a method","warn"); return; }
+  try{
+    $("analysis-status")&&( $("analysis-status").textContent="Running...");
+    const payload={method:m}; if(m==="value_counts") payload.column=column; if(m==="kmeans") payload.k=k;
+    const data=await handleApi("/api/analyze",{method:"POST",body:payload});
+    switch(m){
+      case "summary":      lsSet("summary",data.summary); inferColumnTypes(); break;
+      case "correlation":  lsSet("correlation",compressCorr(data.correlation)); break;
+      case "value_counts": lsSet("valueCounts",{labels:data.labels,values:data.values,title:data.title}); break;
+      case "pca":          lsSet("pca",{components:data.components,explained:data.explained_variance,columns:data.columns}); break;
+      case "kmeans":       lsSet("kmeans",{labels_preview:data.labels,centers:data.centers,columns:data.columns}); break;
+      case "assoc_rules":  lsSet("assoc",data.rules); break;
+    }
+    $("analysis-status")&&( $("analysis-status").textContent="Done ✓");
+    toast("Analysis stored – open Visualize","success");
+  }catch(e){
+    $("analysis-status")&&( $("analysis-status").textContent="Error");
+    toast("Analysis error: "+e.message,"error");
+  }
+}
+function compressCorr(obj){
+  const out={}; const cols=Object.keys(obj||{});
+  cols.forEach(r=>{
+    out[r]={};
+    Object.keys(obj[r]||{}).forEach(c=>{
+      const v=obj[r][c]; out[r][c]=typeof v==="number"?Number(v.toFixed(4)):v;
+    });
+  });
+  return out;
+}
+
+/* ---------------- AI Insight ---------------- */
+async function buildAISnippet(maxRows=20){
+  const bundle=lsGet("autoBundle");
+  const file=localStorage.getItem("filename");
+  let preview=null;
+  try{
+    const res=await handleApi("/api/preview_json",{method:"POST",body:{filename:file}});
+    preview={columns:res.columns,rows:(res.rows||[]).slice(0,maxRows)};
+  }catch(_){}
+  return {
+    meta: bundle?.profile?.basic || {},
+    top_corr: (bundle?.top_correlations||[]).slice(0,8),
+    value_counts: bundle?.categorical ? Object.fromEntries(Object.entries(bundle.categorical).slice(0,2)) : null,
+    summary_stats: bundle?.summary ? Object.fromEntries(Object.entries(bundle.summary).slice(0,6)) : null,
+    preview
+  };
+}
+const stripFences = str => typeof str==="string"
+  ? str.replace(/```json|```/gi,"")
+       .replace(/^\s*"{?\s*json"?\s*[:{]/i,"{")
+       .replace(/^\s*json\s*[:{]/i,"{")
+       .trim()
+  : str;
 
 function cleanAIBlock(objOrStr){
   if(typeof objOrStr === "string"){
@@ -400,74 +412,12 @@ async function autoExplore(){
     toast("Auto Explore complete","success");
     inferColumnTypes();
     if(document.body.getAttribute("data-page")==="visualization"){
-      updateVizDatasetMeta();
-      ensureCorrelation();
-      renderOverview();
-      renderAINarrative();
-      syncExportButtons();
+      ensureCorrelation(); renderOverview(); renderAINarrative(); syncExportButtons();
     }
   }catch(e){
     prog&&(prog.textContent="Error");
     toast("Auto explore failed: "+e.message,"error");
   }
-function updateVizDatasetMeta() {
-  const metaBox = document.getElementById("viz-dataset-meta");
-  const filename = localStorage.getItem("filename");
-  if (metaBox) {
-    metaBox.textContent = filename ? filename : "No active dataset.";
-  }
-}
-
-function renderOverview() {
-  const box = document.getElementById("overview-meta");
-  const bundle = lsGet("autoBundle");
-  if (!box) return;
-  if (!bundle || !bundle.profile || !bundle.profile.basic) {
-    box.innerHTML = "<p class='text-dim'>No overview available. Run Auto Explore.</p>";
-    return;
-  }
-  const meta = bundle.profile.basic;
-  box.innerHTML = `
-    <div>
-      <strong>Rows:</strong> ${meta.rows ?? "?"} &nbsp; 
-      <strong>Columns:</strong> ${meta.columns ?? "?"} &nbsp; 
-      <strong>Numeric:</strong> ${meta.numeric_cols ?? "?"} &nbsp; 
-      <strong>Categorical:</strong> ${meta.categorical_cols ?? "?"}
-    </div>
-    <div style="margin-top:.7em;">
-      <strong>Sample columns:</strong> ${meta.columns_list ? meta.columns_list.join(", ") : ""}
-    </div>
-  `;
-}
-
-function renderAINarrative() {
-  const box = document.getElementById("ai-narrative-box");
-  const ai = lsGet("lastAI") || lsGet("autoAI");
-  if (!box) return;
-  if (!ai) {
-    box.innerHTML = "<p class='text-dim'>No AI insight generated yet.</p>";
-    return;
-  }
-  let html = "";
-  if (ai.summary) html += `<p><strong>Summary:</strong> ${ai.summary}</p>`;
-  if (ai.key_points && ai.key_points.length) {
-    html += `<p><strong>Key Points</strong></p><ul>${ai.key_points.map(k => `<li>${k}</li>`).join("")}</ul>`;
-  }
-  if (ai.anomalies && ai.anomalies.length) {
-    html += `<p><strong>Anomalies</strong></p><ul>${ai.anomalies.map(a => `<li>${a}</li>`).join("")}</ul>`;
-  }
-  if (ai.recommendation) html += `<p><strong>Recommendation:</strong> ${ai.recommendation}</p>`;
-  box.innerHTML = html;
-}
-(function(){
-  if(document.body.getAttribute("data-page")==="visualization"){
-    document.addEventListener("DOMContentLoaded",function(){
-      updateVizDatasetMeta();
-      renderOverview();
-      renderAINarrative();
-    });
-  }
-})();
 }
 function storeAutoBundle(result){
   const b=result.bundle, ai=result.ai;
@@ -802,95 +752,32 @@ function copyToClipboard(txt){
 }
 
 /* ---------- PCA ---------- */
-
-function renderPCA() {
-  const pca = lsGet("pca") || lsGet("autoBundle")?.pca;
-  const km = lsGet("kmeans") || lsGet("autoBundle")?.kmeans;
-  const box = $("pca-box") || $("pca-container");
-  if (!box) return;
-  const comps = pca?.components_2d || pca?.components;
-  if (!comps || !Array.isArray(comps) || comps.length === 0) {
-    box.innerHTML = "<p class='text-small text-dim'>No PCA data.</p>";
-    return;
+function renderPCA(){
+  const pca=lsGet("pca")||lsGet("autoBundle")?.pca;
+  const box=$("pca-box")||$("pca-container"); if(!box) return;
+  const comps=pca?.components_2d || pca?.components;
+  if(!comps){ box.innerHTML="<p class='text-small text-dim'>No PCA data.</p>"; return; }
+  // Robust scaling: trim outliers, pad axes
+  let pts=comps.map(p=>({x:p[0],y:p[1]}));
+  // Outlier trimming (1st-99th percentile)
+  function getBounds(arr, key) {
+    const vals = arr.map(o=>o[key]).sort((a,b)=>a-b);
+    const q = p => vals[Math.floor(p*vals.length)];
+    return [q(0.01), q(0.99)];
   }
-
-  // Find min/max for scaling
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  comps.forEach(([x, y]) => {
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-  });
-  // Add 5% padding
-  const padX = (maxX - minX) * 0.05;
-  const padY = (maxY - minY) * 0.05;
-  minX -= padX; maxX += padX; minY -= padY; maxY += padY;
-
-  // Try to color by cluster if available
-  const labels = km?.labels_preview || [];
-  const hasClusters = labels.length === comps.length;
-  const colors = ["#02b2ff","#b136ff","#ffb86c","#10b981","#ef4444","#f59e42","#7a4bff","#ff7a7a"];
-  const datasets = hasClusters
-    ? [...new Set(labels)].map((cl,idx)=>({
-        label: "Cluster "+cl,
-        data: comps.map((p,i)=>labels[i]===cl?{x:p[0],y:p[1]}:null).filter(Boolean),
-        backgroundColor: colors[cl%colors.length]+"cc",
-        pointRadius: 4,
-        pointHoverRadius: 7,
-      }))
-    : [{
-        label:"PCA",
-        data: comps.map(p=>({x:p[0],y:p[1]})),
-        backgroundColor:"#02b2ffcc",
-        pointRadius: 4,
-        pointHoverRadius: 7,
-      }];
-
-  box.innerHTML = "<canvas id='pca-canvas' style='width:100%;height:100%'></canvas>";
-  const ctx = $("pca-canvas").getContext("2d");
-  if (VizCharts.pca) VizCharts.pca.destroy();
-
-  const exp = pca?.explained || pca?.explained_variance || [];
-  VizCharts.pca = new Chart(ctx, {
-    type: "scatter",
-    data: { datasets },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { display: true },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              const d = ctx.raw;
-              let txt = `(${d.x.toFixed(2)}, ${d.y.toFixed(2)})`;
-              if (hasClusters && ctx.dataset.label) txt += ` | ${ctx.dataset.label}`;
-              return txt;
-            }
-          }
-        }
-      },
-      scales: {
-        x: {
-          min: minX,
-          max: maxX,
-          title: {
-            display: true,
-            text: `PC1${exp[0] ? ` (${(exp[0]*100).toFixed(1)}%)` : ""}`,
-            color: "#b8c9d6"
-          },
-          ticks: { color: getCss('--text-dim') }
-        },
-        y: {
-          min: minY,
-          max: maxY,
-          title: {
-            display: true,
-            text: `PC2${exp[1] ? ` (${(exp[1]*100).toFixed(1)}%)` : ""}`,
-            color: "#b8c9d6"
-          },
-          ticks: { color: getCss('--text-dim') }
-        }
+  let [minX,maxX]=getBounds(pts,'x'), [minY,maxY]=getBounds(pts,'y');
+  // Pad axes by 10%
+  const pad = (min,max) => { const d=max-min; return [min-0.1*d,max+0.1*d]; };
+  [minX,maxX]=pad(minX,maxX); [minY,maxY]=pad(minY,maxY);
+  box.innerHTML="<canvas id='pca-canvas' style='width:100%;height:100%'></canvas>";
+  const ctx=$("pca-canvas").getContext("2d");
+  if(VizCharts.pca) VizCharts.pca.destroy();
+  VizCharts.pca=new Chart(ctx,{type:"scatter",
+    data:{datasets:[{label:"PCA",data:pts}]},
+    options:{responsive:true,plugins:{legend:{display:false}},
+      scales:{
+        x:{min:minX,max:maxX,ticks:{color:getCss('--text-dim')}},
+        y:{min:minY,max:maxY,ticks:{color:getCss('--text-dim')}}
       }
     }
   });
@@ -898,128 +785,339 @@ function renderPCA() {
 }
 
 /* ---------- KMeans ---------- */
-
-function renderKMeans() {
-  const km = lsGet("kmeans") || lsGet("autoBundle")?.kmeans;
-  const pca = lsGet("pca") || lsGet("autoBundle")?.pca;
-  const box = $("kmeans-box") || $("kmeans-container");
-  if (!box) return;
-  const labels = km?.labels_preview || km?.labels;
-  if (!labels) {
-    box.innerHTML = "<p class='text-small text-dim'>No clustering data.</p>";
-    return;
+function renderKMeans(){
+  const km=lsGet("kmeans")||lsGet("autoBundle")?.kmeans;
+  const box=$("kmeans-box")||$("kmeans-container"); if(!box) return;
+  const labels=km?.labels_preview || km?.labels;
+  const comps=km?.components_2d || km?.components;
+  if(!labels||!comps){ box.innerHTML="<p class='text-small text-dim'>No clustering data.</p>"; return; }
+  // Use 2D components for scatter, color by label
+  let pts=comps.map((p,i)=>({x:p[0],y:p[1],c:labels[i]}));
+  // Outlier trimming and scaling
+  function getBounds(arr, key) {
+    const vals = arr.map(o=>o[key]).sort((a,b)=>a-b);
+    const q = p => vals[Math.floor(p*vals.length)];
+    return [q(0.01), q(0.99)];
   }
-
-  // Use PCA for 2D plotting if available
-  const comps = pca?.components_2d;
-  if (!comps || comps.length !== labels.length) {
-    // fallback: 1D cluster plot
-    const pts = labels.map((lab, i) => ({ x: i, y: lab }));
-    // Find min/max for scaling
-    let minX = 0, maxX = labels.length - 1, minY = Math.min(...labels), maxY = Math.max(...labels);
-    const padX = (maxX - minX) * 0.05;
-    const padY = (maxY - minY) * 0.05;
-    minX -= padX; maxX += padX; minY -= padY; maxY += padY;
-    box.innerHTML = "<canvas id='kmeans-canvas' style='width:100%;height:100%'></canvas>";
-    const ctx = $("kmeans-canvas").getContext("2d");
-    if (VizCharts.kmeans) VizCharts.kmeans.destroy();
-    VizCharts.kmeans = new Chart(ctx, {
-      type: "scatter",
-      data: { datasets: [{ label: "Clusters", data: pts, backgroundColor: "#b136ffcc" }] },
-      options: {
-        responsive: true,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { min: minX, max: maxX, ticks: { color: getCss('--text-dim') } },
-          y: { min: minY, max: maxY, ticks: { color: getCss('--text-dim') } }
-        }
-      }
-    });
-    syncExportButtons();
-    return;
-  }
-
-  // 2D cluster plot in PCA space
-  // Find min/max for scaling
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  comps.forEach(([x, y]) => {
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-  });
-  const padX = (maxX - minX) * 0.05;
-  const padY = (maxY - minY) * 0.05;
-  minX -= padX; maxX += padX; minY -= padY; maxY += padY;
-
-  const colors = ["#02b2ff","#b136ff","#ffb86c","#10b981","#ef4444","#f59e42","#7a4bff","#ff7a7a"];
-  const clusters = [...new Set(labels)];
-  const datasets = clusters.map((cl, idx) => ({
-    label: "Cluster " + cl,
-    data: comps.map((p, i) => labels[i] === cl ? { x: p[0], y: p[1] } : null).filter(Boolean),
-    backgroundColor: colors[cl % colors.length] + "cc",
-    pointRadius: 4,
-    pointHoverRadius: 7,
-  }));
-
-  // Cluster centers (if available)
-  let centers = [];
-  if (km?.centers && km.centers[0].length >= 2) {
-    centers = km.centers.map((c, i) => ({
-      x: c[0], y: c[1], cluster: i
-    }));
-    datasets.push({
-      label: "Centers",
-      data: centers,
-      backgroundColor: "#fff",
-      borderColor: "#000",
-      pointRadius: 8,
-      pointStyle: "rectRot",
-      showLine: false
-    });
-  }
-
-  box.innerHTML = "<canvas id='kmeans-canvas' style='width:100%;height:100%'></canvas>";
-  const ctx = $("kmeans-canvas").getContext("2d");
-  if (VizCharts.kmeans) VizCharts.kmeans.destroy();
-
-  VizCharts.kmeans = new Chart(ctx, {
-    type: "scatter",
-    data: { datasets },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { display: true },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              const d = ctx.raw;
-              let txt = `(${d.x.toFixed(2)}, ${d.y.toFixed(2)})`;
-              if (ctx.dataset.label && ctx.dataset.label.startsWith("Cluster")) txt += ` | ${ctx.dataset.label}`;
-              if (ctx.dataset.label === "Centers") txt += " (center)";
-              return txt;
-            }
-          }
-        }
-      },
-      scales: {
-        x: { min: minX, max: maxX, title: { display: true, text: "PC1", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } },
-        y: { min: minY, max: maxY, title: { display: true, text: "PC2", color: "#b8c9d6" }, ticks: { color: getCss('--text-dim') } }
+  let [minX,maxX]=getBounds(pts,'x'), [minY,maxY]=getBounds(pts,'y');
+  const pad = (min,max) => { const d=max-min; return [min-0.1*d,max+0.1*d]; };
+  [minX,maxX]=pad(minX,maxX); [minY,maxY]=pad(minY,maxY);
+  // Group by cluster label for color
+  const clusters={}; pts.forEach(p=>{if(!clusters[p.c])clusters[p.c]=[];clusters[p.c].push(p);});
+  const colors=["#2563eb","#f59e42","#10b981","#ef4444","#a21caf","#eab308","#0ea5e9","#f43f5e","#14b8a6","#64748b"];
+  box.innerHTML="<canvas id='kmeans-canvas' style='width:100%;height:100%'></canvas>";
+  const ctx=$("kmeans-canvas").getContext("2d");
+  if(VizCharts.kmeans) VizCharts.kmeans.destroy();
+  VizCharts.kmeans=new Chart(ctx,{type:"scatter",
+    data:{datasets:Object.entries(clusters).map(([lab,pts],i)=>({label:`Cluster ${lab}`,data:pts,backgroundColor:colors[i%colors.length]}))},
+    options:{responsive:true,plugins:{legend:{display:true}},
+      scales:{
+        x:{min:minX,max:maxX,ticks:{color:getCss('--text-dim')}},
+        y:{min:minY,max:maxY,ticks:{color:getCss('--text-dim')}}
       }
     }
   });
   syncExportButtons();
 }
 
-/* ---------------- Column Type Inference ---------------- */
-async function inferColumnTypes() {
-  const file = localStorage.getItem("filename");
-  if (!file) return;
-  try {
-    const res = await handleApi("/api/coltypes");
-    if (res.types) lsSet("colTypesCache", res.types);
-  } catch (e) {
-    console.error("Error inferring column types:", e);
-  }
-// End of file
+/* ---------- Association Rules ---------- */
+function renderAssoc(){
+  const assoc=lsGet("assoc")||lsGet("autoBundle")?.assoc_rules;
+  const box=$("assoc-box")||$("assoc-container"); if(!box) return;
+  if(!assoc||!assoc.length){ box.innerHTML="<p class='text-small text-dim'>No rules.</p>"; return; }
+  let h=`<table class='data-table'><thead><tr>
+  <th>Antecedents</th><th>Consequents</th><th>Support</th><th>Confidence</th><th>Lift</th>
+  </tr></thead><tbody>`;
+  assoc.slice(0,100).forEach(r=>{
+    h+=`<tr>
+      <td>${Array.isArray(r.antecedents)?r.antecedents.join(", "):r.antecedents}</td>
+      <td>${Array.isArray(r.consequents)?r.consequents.join(", "):r.consequents}</td>
+      <td>${(+r.support||0).toFixed(3)}</td>
+      <td>${(+r.confidence||0).toFixed(3)}</td>
+      <td>${(+r.lift||0).toFixed(3)}</td>
+    </tr>`;
+  });
+  h+="</tbody></table>";
+  box.innerHTML=h;
 }
+
+/* ---------- Summary ---------- */
+function renderSummary(){
+  const sum=lsGet("summary")||lsGet("autoBundle")?.summary;
+  const box=$("summary-box")||$("summary-container"); if(!box) return;
+  if(!sum){ box.innerHTML="<p class='text-small text-dim'>No summary data.</p>"; return; }
+  const cols=Object.keys(sum); const stats=new Set(); cols.forEach(c=>Object.keys(sum[c]).forEach(k=>stats.add(k)));
+  let h="<table class='data-table'><thead><tr><th>Metric</th>"+cols.map(c=>`<th>${c}</th>`).join("")+"</tr></thead><tbody>";
+  [...stats].forEach(st=>{
+    h+=`<tr><th style="background:#1a2c3a">${st}</th>`;
+    cols.forEach(c=>{
+      let v=sum[c][st];
+      if(v==null) v=""; else if(typeof v==="number") v=(Math.abs(v)>1e6||Math.abs(v)<1e-4)?v:v.toPrecision(6);
+      h+=`<td>${v}</td>`;
+    });
+    h+="</tr>";
+  });
+  h+="</tbody></table>"; box.innerHTML=h;
+}
+
+/* ---------- AI Narrative render ---------- */
+function renderAINarrative(){
+  const box = $("ai-narrative-box") || $("ai-latest");
+  if(!box) return;
+
+  const raw = lsGet("autoAI") || lsGet("lastAI");
+  if(!raw){
+    box.innerHTML = "<p class='text-small text-dim'>No AI narrative yet.</p>";
+    return;
+  }
+
+  const ai = cleanAIBlock(raw);
+
+  const list = (title, arr) =>
+    (arr && arr.length)
+      ? `<strong style="font-size:.62rem;">${title}</strong>
+         <ul style="font-size:.6rem;margin:.35rem 0 .6rem 1rem;">${arr.map(x=>`<li>${x}</li>`).join("")}</ul>`
+      : "";
+
+  let html = "";
+  if(ai.summary) html += `<p style="font-size:.66rem;line-height:1.45">${ai.summary}</p>`;
+  html += list("Key Points", ai.key_points);
+  html += list("Anomalies",  ai.anomalies);
+  if(ai.recommendation){
+    html += `<p style="font-size:.6rem;"><strong>Recommendation:</strong> ${ai.recommendation}</p>`;
+  }
+  html += list("Next Steps", ai.next_steps);
+
+  box.innerHTML = html || "<em>AI narrative present but unstructured.</em>";
+}
+
+/* ---------- Overview ---------- */
+function renderOverview(){
+  const b=lsGet("autoBundle");
+  const oc=$("overview-meta")||$("overview-container"); if(!oc) return;
+  if(!b){
+    const fn=localStorage.getItem("filename")||"(none)";
+    oc.innerHTML=`<p class='text-small text-dim'>No Auto Explore yet. Active file: <strong>${fn}</strong>.</p>`;
+    return;
+  }
+  const base=b.profile?.basic||{};
+  const rec=(b.recommended_charts||[]).map(c=>c.type||c).join(", ");
+  oc.innerHTML=`
+    <div class="inline wrap" style="gap:.4rem;margin-bottom:.4rem;">
+      <span class="badge-chip">${b.filename}</span>
+      <span class="badge-chip">${base.rows} rows</span>
+      <span class="badge-chip">${base.columns} cols</span>
+      <span class="badge-chip">${base.numeric_cols} numeric</span>
+      <span class="badge-chip">${base.categorical_cols} categorical</span>
+    </div>
+    <p style="font-size:.63rem;margin:.4rem 0;"><strong>Recommended charts:</strong> ${rec||"—"}</p>`;
+}
+
+/* ---------- Column type ribbon ---------- */
+function inferColumnTypes(){
+  const bundle=lsGet("autoBundle"), summary=bundle?.summary||lsGet("summary");
+  let cols=[]; if(summary) cols=Object.keys(summary);
+  const types={}, rowCount=bundle?.profile?.basic?.rows||0;
+  const numR=/(_amt|_num|count|total|sum|avg|mean|price|age|score|rate|pct|perc|lat|lon|long|prob|rank)$/i;
+  const dateR=/(date|day|time|timestamp|dt)$/i;
+  const idR=/(id|uuid|guid|code|ref)$/i;
+  const boolR=/^(is_|has_|flag_|active|enabled|valid)/i;
+  cols.forEach(c=>{
+    const info=summary?.[c]||{}, u=info.unique??info.Unique??null;
+    let k="TEXT";
+    if(info.mean!==undefined||info.std!==undefined||info.max!==undefined) k="NUM";
+    if(u!==null){
+      if(u<=2) k="BOOL";
+      else if(u<=Math.min(20,Math.max(10,rowCount*0.05)) && k!=="NUM") k="CAT";
+    }
+    if(dateR.test(c)) k="DATE";
+    if(idR.test(c))   k="ID";
+    if(boolR.test(c)) k="BOOL";
+    if(numR.test(c)&&k!=="DATE") k="NUM";
+    types[c]=k;
+  });
+  try{localStorage.setItem("colTypesCache",JSON.stringify(types));}catch{}
+  renderColumnTypeRibbon(types);
+}
+function renderColumnTypeRibbon(types){
+  const wrap=$("viz-columns")||$("col-type-ribbon"); if(!wrap) return;
+  wrap.innerHTML="";
+  if(!types||!Object.keys(types).length){
+    wrap.innerHTML='<span class="text-small text-dim" style="padding:.25rem 0;">No columns detected</span>';
+    return;
+  }
+  Object.entries(types).forEach(([col,kind])=>{
+    const el=document.createElement("code");
+    el.className="chip-col";
+    el.dataset.kind=kind; el.dataset.col=col;
+    el.innerHTML=`${col}<span class="chip-kind">${kind}</span>`;
+    el.addEventListener("click",()=>handleColumnTypeClick(col,kind));
+    wrap.appendChild(el);
+  });
+}
+function handleColumnTypeClick(col,kind){
+  if(["CAT","BOOL","ID"].includes(kind)){
+    toast(`Primary categorical: ${col}`,"info");
+    localStorage.setItem("primaryCategorical",col);
+    const b=lsGet("autoBundle");
+    if(b?.categorical?.[col]){
+      const counts=b.categorical[col];
+      lsSet("valueCounts",{labels:counts.map(x=>x.value),values:counts.map(x=>x.count),title:`Top ${col}`});
+      if(window.currentVizTab==="value_counts"||window.currentVizTab==="overview") renderValueCounts();
+    }
+  }else toast(`"${col}" is ${kind}. Use numeric analyses.`, "warn");
+}
+
+/* ---------- Meta banner ---------- */
+async function loadMeta(){
+  const box=$("viz-dataset-meta")||$("dataset-meta");
+  const chip=$("active-file-chip");
+  try{
+    const js=await handleApi("/api/files");
+    const active=js.active||localStorage.getItem("filename");
+    if(active){
+      chip&&(chip.textContent=`Active: ${active}`);
+      const f=(js.files||[]).find(x=>x.filename===active)||{};
+      box && (box.innerHTML=`<strong>${active}</strong><br>Rows: ${f.rows??"?"} | Cols: ${f.columns??"?"} | Size: ${f.size_bytes?(f.size_bytes/1024).toFixed(1)+" KB":"?"}`);
+      const b=lsGet("autoBundle")||{};
+      b.filename=active;
+      b.profile=b.profile||{}; b.profile.basic=b.profile.basic||{};
+      if(f.rows) b.profile.basic.rows=f.rows;
+      if(f.columns) b.profile.basic.columns=f.columns;
+      lsSet("autoBundle",b);
+    }else{ box&&(box.textContent="No active dataset."); }
+  }catch(e){ box&&(box.textContent="Metadata error: "+e.message); }
+}
+
+/* ---------------- Page inits ---------------- */
+function initVisualizationPage(){
+  loadMeta();
+  renderOverview();
+  const vc=lsGet("valueCounts"); if(vc) renderValueCounts(vc.mode);
+  renderAINarrative();
+  const cached=localStorage.getItem("colTypesCache");
+  if(cached){ try{renderColumnTypeRibbon(JSON.parse(cached));}catch{inferColumnTypes();} }
+  else inferColumnTypes();
+  syncExportButtons();
+}
+function initDashboardPage(){ previewDataset(); loadMeta(); }
+function initAdminPage(){ adminLoadUsers(); previewDataset(); }
+function initAnalysisPage(){ previewDataset(); loadMeta(); }
+
+/* ---------------- DOM Ready ---------------- */
+document.addEventListener("DOMContentLoaded", async ()=>{
+  await ensureAuthForProtectedPages();
+  await syncActiveFile(true);
+
+  const page=document.body.getAttribute("data-page");
+  window.currentVizTab="overview";
+
+  if(page==="visualization")      initVisualizationPage();
+  else if(page==="dashboard")     initDashboardPage();
+  else if(page==="admin")         initAdminPage();
+  else if(page==="analysis")      initAnalysisPage();
+
+  // Common listeners
+  $("smart-search-btn")?.addEventListener("click",smartSearch);
+  $("fetch-btn")?.addEventListener("click",()=>{ const u=$("remote-url")?.value?.trim(); if(u) fetchFromInternet(u); });
+  $("upload-btn")?.addEventListener("click",uploadDataset);
+  $("clean-btn")?.addEventListener("click",applyCleaning);
+  $("analyze-btn")?.addEventListener("click",runAnalysis);
+  $("ai-generate-btn")?.addEventListener("click",generateAISummary);
+  $("qi-run")?.addEventListener("click",generateAISummary);
+  $("qi-rerun")?.addEventListener("click",generateAISummary);
+  $("auto-explore-btn")?.addEventListener("click",autoExplore);
+  $("viz-auto-explore")?.addEventListener("click",autoExplore);
+  $("md-report-btn")?.addEventListener("click",downloadMarkdownReport);
+  $("pdf-report-btn")?.addEventListener("click",downloadPdfReport);
+  $("btn-clear-cache")?.addEventListener("click",clearAnalysis);
+  $("viz-clear-cache")?.addEventListener("click",clearAnalysis);
+
+  document.querySelectorAll("#logout-link,.logout-link,a[href='#logout']").forEach(el=>{
+    el.addEventListener("click",e=>{e.preventDefault();logout();});
+  });
+
+  $("download-corr-csv")?.addEventListener("click",downloadCorrelationCSV);
+  $("download-corr-png")?.addEventListener("click",downloadCorrelationPNG);
+  $("btn-corr-export-csv-2")?.addEventListener("click",downloadCorrelationCSV);
+  $("btn-corr-export-png-2")?.addEventListener("click",downloadCorrelationPNG);
+  $("corr-scale")?.addEventListener("change",()=>{ if(window.currentVizTab==="correlation") renderCorrTable(); });
+
+  // VC mode toggle
+  document.querySelectorAll("[data-vc-mode]")?.forEach(b=>{
+    b.addEventListener("click",()=>renderValueCounts(b.dataset.vcMode));
+  });
+
+  // Refresh meta
+  $("btn-refresh-meta")?.addEventListener("click",loadMeta);
+  $("viz-refresh-meta-2")?.addEventListener("click",loadMeta);
+
+  // Tabs
+  const tabsRoot=$("viz-tabs");
+  if(tabsRoot){
+    tabsRoot.addEventListener("click",e=>{
+      const btn=e.target.closest("button[data-tab]"); if(!btn) return;
+      const tab=btn.dataset.tab; window.currentVizTab=tab;
+      tabsRoot.querySelectorAll("button").forEach(b=>{
+        const on=b===btn; b.classList.toggle("active",on); b.setAttribute("aria-selected",on?"true":"false");
+      });
+      const secs={overview:"sec-overview",value_counts:"sec-value_counts",correlation:"sec-correlation",
+                  pca:"sec-pca",kmeans:"sec-kmeans",assoc:"sec-assoc",summary:"sec-summary",ai:"sec-ai"};
+      Object.entries(secs).forEach(([k,id])=>$(id)?.classList.toggle("active",k===tab));
+
+      if(tab==="value_counts") renderValueCounts();
+      if(tab==="correlation")  ensureCorrelation();
+      if(tab==="pca")          renderPCA();
+      if(tab==="kmeans")       renderKMeans();
+      if(tab==="assoc")        renderAssoc();
+      if(tab==="summary")      renderSummary();
+      if(tab==="ai")           renderAINarrative();
+      if(tab==="overview")     renderOverview();
+    });
+  }
+
+  // Resize -> redraw corr
+  let t=null;
+  window.addEventListener("resize",()=>{
+    if(window.currentVizTab==="correlation"){
+      clearTimeout(t); t=setTimeout(renderCorrTable,220);
+    }
+  });
+
+  // Storage sync
+  window.addEventListener("storage",ev=>{
+    if(["autoBundle","valueCounts","correlation","filename"].includes(ev.key)){
+      if(page==="visualization") initVisualizationPage();
+      if(page==="dashboard") previewDataset();
+    }
+  });
+});
+
+/* ---------------- Expose for console/debug ---------------- */
+window.previewDataset=previewDataset;
+window.generateAISummary=generateAISummary;
+window.runAnalysis=runAnalysis;
+window.autoExplore=autoExplore;
+window.renderValueCounts=renderValueCounts;
+window.renderInteractiveCorrelation=renderInteractiveCorrelation;
+window.renderCorrTable=renderCorrTable;
+window.ensureCorrelation=ensureCorrelation;
+window.renderPCA=renderPCA;
+window.renderKMeans=renderKMeans;
+window.renderAssoc=renderAssoc;
+window.renderSummary=renderSummary;
+window.renderAINarrative=renderAINarrative;
+window.renderOverview=renderOverview;
+window.downloadCorrelationCSV=downloadCorrelationCSV;
+window.downloadCorrelationPNG=downloadCorrelationPNG;
+window.clearAnalysis=clearAnalysis;
+window.handleApi=handleApi;
+window.downloadMarkdownReport=downloadMarkdownReport;
+window.downloadPdfReport=downloadPdfReport;
+window.downloadChart=downloadChart;
+window.exportDataCsv=exportDataCsv;
+window.smartSearch=smartSearch;
+window.fetchFromInternet=fetchFromInternet;
+window.uploadDataset=uploadDataset;
+window.applyCleaning=applyCleaning;
+window.inferColumnTypes=inferColumnTypes;
