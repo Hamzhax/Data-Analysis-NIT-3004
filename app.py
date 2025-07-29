@@ -159,9 +159,9 @@ def slim_bundle(bundle):
     if "assoc_rules" in out and len(out["assoc_rules"]) > 100:
         out["assoc_rules"] = out["assoc_rules"][:100]
     
-    # PCA - keep all data, it's already limited to 300 points
-    if "pca" in bundle:
-        out["pca"] = bundle["pca"]
+    # Time Series - keep limited data
+    if "time_series" in bundle:
+        out["time_series"] = bundle["time_series"]
     
     # K-means - keep all data, it's already limited to 300 points  
     if "kmeans" in bundle:
@@ -689,7 +689,7 @@ def coltypes():
         return fail(str(e), 500)
 
 # ---------- ANALYZE ----------
-VALID_METHODS = {"summary", "correlation", "value_counts", "pca", "kmeans", "assoc_rules"}
+VALID_METHODS = {"summary", "correlation", "value_counts", "time_series", "kmeans", "assoc_rules"}
 
 @app.post("/api/analyze")
 def analyze():
@@ -727,16 +727,69 @@ def analyze():
             counts = df[column].astype(str).value_counts().head(50)
             return ok(method=method, labels=counts.index.tolist(), values=counts.tolist(), title=f"Value Counts {column}")
 
-        if method == "pca":
+        if method == "linear_regression":
             num = df.select_dtypes(include="number").dropna()
             if num.shape[1] < 2: return fail("Need >=2 numeric columns.")
-            from sklearn.decomposition import PCA
-            pca = PCA(n_components=min(3, num.shape[1]), random_state=42)
-            comps = pca.fit_transform(num)
+            from sklearn.linear_model import LinearRegression
+            from sklearn.metrics import r2_score, mean_squared_error
+            
+            # Use first column as target, others as features
+            target_col = num.columns[0]
+            feature_cols = num.columns[1:]
+            
+            X = num[feature_cols]
+            y = num[target_col]
+            
+            lr = LinearRegression()
+            lr.fit(X, y)
+            predictions = lr.predict(X)
+            
+            # Calculate metrics
+            r2 = r2_score(y, predictions)
+            mse = mean_squared_error(y, predictions)
+            
+            # Feature importance (coefficients)
+            coefficients = [{
+                "feature": col,
+                "coefficient": float(coef)
+            } for col, coef in zip(feature_cols, lr.coef_)]
+            
             return ok(method=method,
-                      components=[[float(a), float(b)] for a, b in comps[:, :2].tolist()],
-                      explained_variance=pca.explained_variance_ratio_.tolist(),
-                      columns=num.columns.tolist())
+                      r2_score=float(r2),
+                      mse=float(mse),
+                      intercept=float(lr.intercept_),
+                      coefficients=coefficients,
+                      target_column=target_col,
+                      feature_columns=feature_cols.tolist())
+
+        if method == "time_series":
+            # Simple time series analysis - detect trends and patterns
+            num = df.select_dtypes(include="number").dropna()
+            if num.empty: return fail("No numeric columns for time series.")
+            
+            # Use the first numeric column for time series analysis
+            col = num.columns[0]
+            values = num[col].values
+            
+            # Calculate moving averages and trends
+            window_size = min(7, len(values) // 4) if len(values) > 10 else 3
+            
+            # Simple moving average
+            moving_avg = []
+            for i in range(len(values)):
+                start = max(0, i - window_size + 1)
+                moving_avg.append(float(values[start:i+1].mean()))
+            
+            # Trend analysis (simple linear trend)
+            x = list(range(len(values)))
+            y = values.tolist()
+            
+            return ok(method=method,
+                      values=[float(v) for v in values[:300]],  # Limit to 300 points
+                      moving_average=moving_avg[:300],
+                      indices=x[:300],
+                      column=col,
+                      trend_direction="increasing" if len(values) > 1 and values[-1] > values[0] else "decreasing")
 
         if method == "kmeans":
             num = df.select_dtypes(include="number").dropna()
@@ -837,7 +890,8 @@ def ai_chart_description():
     
     # Create tailored prompts for different chart types
     prompts = {
-        "pca": "Explain PCA (Principal Component Analysis) in 1-2 sentences focusing on dimensionality reduction and variance explanation.",
+        "time_series": "Explain time series analysis in 1-2 sentences focusing on trend detection and temporal patterns.",
+        "linear_regression": "Explain linear regression in 1-2 sentences focusing on predicting target variables and feature relationships.",
         "kmeans": "Explain K-means clustering in 1-2 sentences focusing on grouping similar data points.",
         "correlation": "Explain correlation analysis in 1-2 sentences focusing on relationships between variables.",
         "value_counts": "Explain value counts analysis in 1-2 sentences focusing on frequency distribution of categories.",
@@ -855,7 +909,8 @@ def ai_chart_description():
         # Fallback if AI fails
         if not description:
             fallbacks = {
-                "pca": "PCA reduces data dimensions while preserving important patterns, helping visualize complex datasets in 2D space.",
+                "time_series": "Time series analysis identifies trends and patterns over time, using moving averages to smooth data and reveal underlying temporal behavior.",
+                "linear_regression": "Linear regression models relationships between variables, predicting target values based on feature patterns with R² indicating model accuracy.",
                 "kmeans": "K-means groups similar data points into clusters, revealing natural patterns and segments in your data.",
                 "correlation": "Correlation analysis shows how variables relate to each other, with values closer to 1 or -1 indicating stronger relationships.",
                 "value_counts": "Value counts show the frequency of different categories, helping identify the most and least common values.",
@@ -869,7 +924,8 @@ def ai_chart_description():
         app.logger.exception("AI chart description failed")
         # Return fallback on error
         fallbacks = {
-            "pca": "PCA reduces data dimensions while preserving important patterns, helping visualize complex datasets in 2D space.",
+            "time_series": "Time series analysis identifies trends and patterns over time, using moving averages to smooth data and reveal underlying temporal behavior.",
+            "linear_regression": "Linear regression models relationships between variables, predicting target values based on feature patterns with R² indicating model accuracy.",
             "kmeans": "K-means groups similar data points into clusters, revealing natural patterns and segments in your data.",
             "correlation": "Correlation analysis shows how variables relate to each other, with values closer to 1 or -1 indicating stronger relationships.",
             "value_counts": "Value counts show the frequency of different categories, helping identify the most and least common values.",
@@ -928,20 +984,78 @@ def build_auto_bundle(filename):
         pairs.sort(key=lambda x: abs(x[2]), reverse=True)
         top_correlations = pairs[:15]
 
-    # PCA
-    pca_result = None
+    # Linear Regression
+    lr_result = None
     if num_df.shape[1] >= 2 and num_df.dropna().shape[0] > 5:
         nd = num_df.dropna()
-        ncomp = min(3, nd.shape[1])
         try:
-            pca = PCA(n_components=ncomp, random_state=42)
-            comps = pca.fit_transform(nd)
-            pca_result = {
-                "explained_variance": pca.explained_variance_ratio_.tolist(),
-                "components_2d": [[float(a), float(b)] for a, b in comps[:300, :2]]
+            from sklearn.linear_model import LinearRegression
+            from sklearn.metrics import r2_score, mean_squared_error
+            
+            # Use first column as target, others as features
+            target_col = nd.columns[0]
+            feature_cols = nd.columns[1:]
+            
+            X = nd[feature_cols]
+            y = nd[target_col]
+            
+            lr = LinearRegression()
+            lr.fit(X, y)
+            predictions = lr.predict(X)
+            
+            # Calculate metrics
+            r2 = r2_score(y, predictions)
+            mse = mean_squared_error(y, predictions)
+            
+            # Feature importance (coefficients)
+            coefficients = [{
+                "feature": col,
+                "coefficient": float(coef)
+            } for col, coef in zip(feature_cols, lr.coef_)]
+            
+            lr_result = {
+                "r2_score": float(r2),
+                "mse": float(mse),
+                "intercept": float(lr.intercept_),
+                "coefficients": coefficients,
+                "target_column": target_col,
+                "feature_columns": feature_cols.tolist()
             }
         except Exception:
-            pca_result = None
+            lr_result = None
+
+    # Time Series Analysis
+    ts_result = None
+    if num_df.shape[1] >= 1 and num_df.dropna().shape[0] > 10:
+        nd = num_df.dropna()
+        try:
+            # Use the first numeric column for time series analysis
+            col = nd.columns[0]
+            values = nd[col].values
+            
+            # Calculate moving averages and trends
+            window_size = min(7, len(values) // 4) if len(values) > 10 else 3
+            
+            # Simple moving average
+            moving_avg = []
+            for i in range(len(values)):
+                start = max(0, i - window_size + 1)
+                moving_avg.append(float(values[start:i+1].mean()))
+            
+            # Trend analysis (simple linear trend)
+            x = list(range(len(values)))
+            y = values.tolist()
+            
+            ts_result = {
+                "values": [float(v) for v in values[:300]],  # Limit to 300 points
+                "moving_average": moving_avg[:300],
+                "indices": x[:300],
+                "column": col,
+                "trend_direction": "increasing" if len(values) > 1 and values[-1] > values[0] else "decreasing",
+                "window_size": window_size
+            }
+        except Exception:
+            ts_result = None
 
     # KMeans
     kmeans_result = None
@@ -964,19 +1078,16 @@ def build_auto_bundle(filename):
                 best_k = max(drops, key=lambda x: x[1])[0]
                 best_model = models[best_k - 2]
                 
-                # Get 2D components for visualization - use PCA result if available
+                # Get 2D components for visualization using PCA
                 components_2d = None
-                if pca_result and "components_2d" in pca_result:
-                    # Use the same subset of data that PCA used, but match kmeans length
-                    pca_components = pca_result["components_2d"]
-                    # Ensure we match the length of K-means labels
-                    min_len = min(len(pca_components), len(best_model.labels_))
-                    components_2d = pca_components[:min_len]
-                elif nd.shape[1] >= 2:
-                    # Create 2D projection for visualization if no PCA
+                if nd.shape[1] >= 2:
+                    # Create 2D projection for visualization
                     from sklearn.decomposition import PCA
                     viz_pca = PCA(n_components=2, random_state=42)
                     components_2d = viz_pca.fit_transform(nd).tolist()
+                    # Ensure we match the length of K-means labels
+                    min_len = min(len(components_2d), len(best_model.labels_))
+                    components_2d = components_2d[:min_len]
                 
                 kmeans_result = {
                     "k": best_k,
@@ -1027,7 +1138,8 @@ def build_auto_bundle(filename):
     rec_charts = []
     if numeric_info:       rec_charts.append({"type": "histogram",            "reason": "Distribution"})
     if correlation_matrix: rec_charts.append({"type": "correlation_heatmap",  "reason": "Relationships"})
-    if pca_result:         rec_charts.append({"type": "pca_scatter",          "reason": "Dimensionality reduction"})
+    if lr_result:          rec_charts.append({"type": "linear_regression",     "reason": "Predictive modeling"})
+    if ts_result:          rec_charts.append({"type": "time_series",           "reason": "Trend analysis"})
     if kmeans_result:      rec_charts.append({"type": "cluster_scatter",      "reason": f"Clusters k={kmeans_result['k']}"})
     if categorical_info:
         first = list(categorical_info.keys())[:2]
@@ -1053,7 +1165,8 @@ def build_auto_bundle(filename):
         "correlation_truncated": truncated,
         "correlation_kept_columns": kept_cols,
         "correlation_original_side": original_side,
-        "pca": pca_result,
+        "linear_regression": lr_result,
+        "time_series": ts_result,
         "kmeans": kmeans_result,
         "assoc_rules": assoc_result,
         "recommended_charts": rec_charts
@@ -1098,7 +1211,8 @@ def ai_narrative_from_bundle(bundle):
             "numeric_cols": list(bundle.get("numeric", {}).keys())[:6],
             "categorical_cols": list(bundle.get("categorical", {}).keys())[:6],
             "top_correlations": [{"a": a, "b": b, "corr": c} for a, b, c in bundle.get("top_correlations", [])[:10]],
-            "pca_var": bundle.get("pca", {}).get("explained_variance") if bundle.get("pca") else None,
+            "lr_r2": bundle.get("linear_regression", {}).get("r2_score") if bundle.get("linear_regression") else None,
+            "ts_trend": bundle.get("time_series", {}).get("trend_direction") if bundle.get("time_series") else None,
             "kmeans_k": bundle.get("kmeans", {}).get("k") if bundle.get("kmeans") else None,
             "rules_count": len(bundle.get("assoc_rules") or []) if bundle.get("assoc_rules") else 0
         }
@@ -1121,7 +1235,8 @@ Return a JSON response with the following structure (ensure valid JSON format):
   ],
   "correlations_comment": "Insight about the correlation patterns found" or null,
   "clusters_comment": "Insight about the clustering results" or null,
-  "pca_comment": "Insight about the PCA dimensionality reduction" or null,
+  "linear_regression_comment": "Insight about the linear regression analysis" or null,
+  "time_series_comment": "Insight about the time series trends and patterns" or null,
   "categorical_insights": [
     "Insight 1 about categorical data patterns",
     "Insight 2 about distributions",
@@ -1174,13 +1289,14 @@ Respond with ONLY the JSON object, no other text.
                 "key_findings": [
                     f"Dataset contains {brief.get('basic', {}).get('numeric_cols', 0)} numeric and {brief.get('basic', {}).get('categorical_cols', 0)} categorical variables",
                     f"Found {len(brief.get('top_correlations', []))} significant correlations",
-                    f"Clustering analysis {'completed' if brief.get('kmeans_k') else 'not available'}",
-                    f"PCA analysis {'shows variance explained' if brief.get('pca_var') else 'not available'}",
+                    f"Clustering analysis {'completed' if brief.get('kmeans') else 'not available'}",
+                    f"Time series analysis {'completed' if brief.get('time_series') else 'not available'}",
                     "Analysis completed with automated insights"
                 ],
                 "correlations_comment": "Correlation analysis completed" if brief.get("top_correlations") else None,
                 "clusters_comment": f"Identified {brief.get('kmeans_k', 'unknown')} clusters" if brief.get("kmeans_k") else None,
-                "pca_comment": "Principal component analysis completed" if brief.get("pca_var") else None,
+                "linear_regression_comment": "Linear regression analysis completed" if brief.get("linear_regression") else None,
+                "time_series_comment": "Time series analysis completed" if brief.get("time_series") else None,
                 "categorical_insights": [
                     f"Found {len(brief.get('categorical_cols', []))} categorical variables",
                     "Distribution analysis completed",

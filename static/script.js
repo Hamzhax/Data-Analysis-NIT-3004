@@ -32,7 +32,7 @@ window.downloadChart = downloadChart;
 window.exportDataCsv = exportDataCsv;
 window.renderOverview = renderOverview;
 window.renderAINarrative = renderAINarrative;
-window.renderPCA = renderPCA;
+window.renderLinearRegression = renderLinearRegression;
 window.renderKMeans = renderKMeans;
 window.renderValueCounts = renderValueCounts;
 window.renderCorrTable = renderCorrTable;
@@ -82,7 +82,7 @@ if (!BASE_URL) {
 window.BASE_URL = BASE_URL;
 
 const LS_KEYS_TO_CLEAR = [
-  "summary","correlation","valueCounts","pca","kmeans","assoc",
+  "summary","correlation","valueCounts","linear_regression","kmeans","assoc",
   "autoBundle","autoAI","lastAI","colTypesCache","primaryCategorical"
 ];
 
@@ -276,12 +276,12 @@ async function runAnalysis(){
       case "summary":      lsSet("summary",data.summary); inferColumnTypes(); break;
       case "correlation":  lsSet("correlation",compressCorr(data.correlation)); break;
       case "value_counts": lsSet("valueCounts",{labels:data.labels,values:data.values,title:data.title}); break;
-      case "pca":          lsSet("pca",{
-        components_2d:data.components,
-        components:data.components,
-        explained:data.explained_variance,
-        explained_variance:data.explained_variance,
-        columns:data.columns
+      case "time_series": lsSet("time_series",{
+        values: data.values,
+        moving_average: data.moving_average,
+        indices: data.indices,
+        column: data.column,
+        trend_direction: data.trend_direction
       }); break;
       case "kmeans":       lsSet("kmeans",{
         labels_preview:data.labels,
@@ -523,25 +523,27 @@ function storeAutoBundle(result){
     }
   }
   
-  // Store PCA data
-  if(b?.pca) {
-    const pcaData = {
-      components_2d: b.pca.components_2d,
-      components: b.pca.components_2d, // Store both for compatibility
-      explained: b.pca.explained_variance,
-      explained_variance: b.pca.explained_variance // Store both keys for compatibility
+  // Store Linear Regression data
+  if(b?.linear_regression) {
+    const lrData = {
+      r2_score: b.linear_regression.r2_score,
+      mse: b.linear_regression.mse,
+      intercept: b.linear_regression.intercept,
+      coefficients: b.linear_regression.coefficients,
+      target_column: b.linear_regression.target_column,
+      feature_columns: b.linear_regression.feature_columns
     };
-    console.log("Storing PCA data:", pcaData); // Debug log
-    console.log("Original PCA from bundle:", b.pca); // Debug original
-    lsSet("pca", pcaData);
+    console.log("Storing Linear Regression data:", lrData); // Debug log
+    console.log("Original LR from bundle:", b.linear_regression); // Debug original
+    lsSet("linear_regression", lrData);
     
     // Also verify it was stored correctly
     setTimeout(() => {
-      const stored = lsGet("pca");
-      console.log("Verified stored PCA data:", stored);
+      const stored = lsGet("linear_regression");
+      console.log("Verified stored LR data:", stored);
     }, 100);
   } else {
-    console.warn("No PCA data in bundle:", b);
+    console.warn("No Linear Regression data in bundle:", b);
   }
   
   // Store K-means data
@@ -785,7 +787,7 @@ async function adminLoadUsers(){
   if(!window.Chart) await load("https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js");
   if(!Chart.controllers?.matrix) await load("https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@1.4.0/dist/chartjs-chart-matrix.min.js");
 })();
-const VizCharts={ valueCounts:null, pca:null, kmeans:null };
+const VizCharts={ valueCounts:null, timeSeries:null, kmeans:null };
 function getCss(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim()||"#94a3b8"; }
 
 /* ---------- Value Counts ---------- */
@@ -1004,122 +1006,133 @@ function copyToClipboard(txt){
   else{ const ta=document.createElement("textarea"); ta.value=txt; document.body.appendChild(ta); ta.select(); try{document.execCommand("copy");}catch{} ta.remove(); }
 }
 
-/* ---------- PCA ---------- */
-function renderPCA(){
-  const pca=lsGet("pca")||lsGet("autoBundle")?.pca;
-  const box=$("pca-box")||$("pca-container"); if(!box) return;
+/* ---------- Linear Regression ---------- */
+function renderLinearRegression(){
+  const lr=lsGet("linear_regression")||lsGet("autoBundle")?.linear_regression;
+  const box=$("lr-box")||$("linear-regression-box")||$("time-series-box"); if(!box) return;
   
-  console.log("PCA data from storage:", pca); // Debug output
-  console.log("AutoBundle:", lsGet("autoBundle")); // Debug output
-  console.log("AutoBundle PCA:", lsGet("autoBundle")?.pca); // Debug output
+  console.log("Linear Regression data from storage:", lr); // Debug output
   
-  const comps=pca?.components_2d || pca?.components;
-  console.log("Components:", comps); // Debug components
-  
-  if(!pca || !comps || !Array.isArray(comps) || comps.length === 0){ 
-    const bundle = lsGet("autoBundle");
-    console.log("PCA data check - Bundle exists:", !!bundle, "Bundle PCA:", bundle?.pca, "Components:", bundle?.pca?.components_2d);
-    
-    if(bundle && bundle.pca && bundle.pca.components_2d && bundle.pca.components_2d.length > 0) {
-      // PCA data exists in bundle but not being extracted properly
-      console.log("Found PCA data in bundle, attempting to render...");
-      const bundleComps = bundle.pca.components_2d;
-      const bundlePCA = bundle.pca;
-      
-      // Render using bundle data directly
-      let pts=bundleComps.map(p=>({x:p[0],y:p[1]}));
-      function getBounds(arr, key) {
-        const vals = arr.map(o=>o[key]).sort((a,b)=>a-b);
-        const q = p => vals[Math.floor(p*vals.length)];
-        return [q(0.01), q(0.99)];
-      }
-      let [minX,maxX]=getBounds(pts,'x'), [minY,maxY]=getBounds(pts,'y');
-      const pad = (min,max) => { const d=max-min; return [min-0.1*d,max+0.1*d]; };
-      [minX,maxX]=pad(minX,maxX); [minY,maxY]=pad(minY,maxY);
-      box.innerHTML="<canvas id='pca-canvas' style='width:100%;height:100%'></canvas>";
-      const ctx=$("pca-canvas").getContext("2d");
-      if(VizCharts.pca) VizCharts.pca.destroy();
-      VizCharts.pca=new Chart(ctx,{type:"scatter",
-        data:{datasets:[{label:"PCA",data:pts,backgroundColor:"#3b82f6",borderColor:"#1d4ed8"}]},
-        options:{responsive:true,plugins:{legend:{display:false}},
-          scales:{
-            x:{min:minX,max:maxX,ticks:{color:getCss('--text-dim')},title:{display:true,text:"PC1"}},
-            y:{min:minY,max:maxY,ticks:{color:getCss('--text-dim')},title:{display:true,text:"PC2"}}
-          }
-        }
-      });
-      
-      // Show explained variance if available
-      if(bundlePCA?.explained_variance || bundlePCA?.explained) {
-        const variance = bundlePCA.explained_variance || bundlePCA.explained;
-        if(variance && variance.length >= 2) {
-          const pc1_var = (variance[0] * 100).toFixed(1);
-          const pc2_var = (variance[1] * 100).toFixed(1);
-          const total_var = ((variance[0] + variance[1]) * 100).toFixed(1);
-          
-          const infoDiv = document.createElement('div');
-          infoDiv.className = 'text-small text-dim';
-          infoDiv.style.marginTop = '0.5rem';
-          infoDiv.innerHTML = `PC1: ${pc1_var}% | PC2: ${pc2_var}% | Total: ${total_var}% variance explained`;
-          box.appendChild(infoDiv);
-        }
-      }
-      
-      syncExportButtons();
-      setTimeout(() => addChartDescription("pca-box", "pca", "PCA visualization showing principal components and explained variance"), 100);
-      return;
-    } else {
-      box.innerHTML="<p class='text-small text-dim'>No PCA data available. Try running Auto Explore first to generate principal component analysis.</p>"; 
-    }
+  if(!lr){ 
+    box.innerHTML="<p class='text-small text-dim'>No Linear Regression data available. Try running Auto Explore or Linear Regression analysis.</p>"; 
     return; 
   }
   
-  // Regular PCA rendering when data is available
-  let pts=comps.map(p=>({x:p[0],y:p[1]}));
-  // Outlier trimming (1st-99th percentile)
-  function getBounds(arr, key) {
-    const vals = arr.map(o=>o[key]).sort((a,b)=>a-b);
-    const q = p => vals[Math.floor(p*vals.length)];
-    return [q(0.01), q(0.99)];
-  }
-  let [minX,maxX]=getBounds(pts,'x'), [minY,maxY]=getBounds(pts,'y');
-  // Pad axes by 10%
-  const pad = (min,max) => { const d=max-min; return [min-0.1*d,max+0.1*d]; };
-  [minX,maxX]=pad(minX,maxX); [minY,maxY]=pad(minY,maxY);
-  box.innerHTML="<canvas id='pca-canvas' style='width:100%;height:100%'></canvas>";
-  const ctx=$("pca-canvas").getContext("2d");
-  if(VizCharts.pca) VizCharts.pca.destroy();
-  VizCharts.pca=new Chart(ctx,{type:"scatter",
-    data:{datasets:[{label:"PCA",data:pts,backgroundColor:"#3b82f6",borderColor:"#1d4ed8"}]},
-    options:{responsive:true,plugins:{legend:{display:false}},
-      scales:{
-        x:{min:minX,max:maxX,ticks:{color:getCss('--text-dim')},title:{display:true,text:"PC1"}},
-        y:{min:minY,max:maxY,ticks:{color:getCss('--text-dim')},title:{display:true,text:"PC2"}}
-      }
-    }
-  });
-  
-  // Show explained variance if available
-  if(pca?.explained_variance || pca?.explained) {
-    const variance = pca.explained_variance || pca.explained;
-    if(variance && variance.length >= 2) {
-      const pc1_var = (variance[0] * 100).toFixed(1);
-      const pc2_var = (variance[1] * 100).toFixed(1);
-      const total_var = ((variance[0] + variance[1]) * 100).toFixed(1);
+  // Create regression results display
+  let html = `
+    <div class="lr-results">
+      <div class="lr-metrics" style="background:#0a1520;border:1px solid #1a2f42;border-radius:6px;padding:0.8rem;margin-bottom:1rem;">
+        <h4 style="margin:0 0 0.5rem;color:#e7f2fb;font-size:0.8rem;">Model Performance</h4>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;font-size:0.7rem;">
+          <div>
+            <span style="color:#a5b8c9;">R² Score:</span>
+            <strong style="color:#6ea8fe;margin-left:0.5rem;">${(lr.r2_score * 100).toFixed(2)}%</strong>
+          </div>
+          <div>
+            <span style="color:#a5b8c9;">MSE:</span>
+            <strong style="color:#f59e0b;margin-left:0.5rem;">${lr.mse.toFixed(4)}</strong>
+          </div>
+        </div>
+        <div style="margin-top:0.5rem;font-size:0.65rem;color:#9fb3c3;">
+          <span style="color:#a5b8c9;">Target:</span> <strong>${lr.target_column}</strong>
+        </div>
+      </div>
       
-      // Add variance info below the chart
-      const infoDiv = document.createElement('div');
-      infoDiv.className = 'text-small text-dim';
-      infoDiv.style.marginTop = '0.5rem';
-      infoDiv.innerHTML = `PC1: ${pc1_var}% | PC2: ${pc2_var}% | Total: ${total_var}% variance explained`;
-      box.appendChild(infoDiv);
-    }
+      <div class="lr-coefficients" style="background:#0a1520;border:1px solid #1a2f42;border-radius:6px;padding:0.8rem;">
+        <h4 style="margin:0 0 0.5rem;color:#e7f2fb;font-size:0.8rem;">Feature Coefficients</h4>
+        <div class="coef-list" style="max-height:200px;overflow-y:auto;">
+  `;
+  
+  // Add intercept
+  html += `
+    <div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid #1a2f42;font-size:0.65rem;">
+      <span style="color:#a5b8c9;">Intercept</span>
+      <strong style="color:#d1e7dd;">${lr.intercept.toFixed(4)}</strong>
+    </div>
+  `;
+  
+  // Add coefficients
+  if(lr.coefficients && lr.coefficients.length > 0) {
+    lr.coefficients.forEach(coef => {
+      const absCoef = Math.abs(coef.coefficient);
+      const color = absCoef > 0.1 ? '#6ea8fe' : absCoef > 0.01 ? '#f59e0b' : '#9fb3c3';
+      html += `
+        <div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid #1a2f42;font-size:0.65rem;">
+          <span style="color:#a5b8c9;">${coef.feature}</span>
+          <strong style="color:${color};">${coef.coefficient.toFixed(4)}</strong>
+        </div>
+      `;
+    });
   }
   
+  html += `
+        </div>
+      </div>
+    </div>
+  `;
+  
+  box.innerHTML = html;
   syncExportButtons();
   
   // Add AI description
-  setTimeout(() => addChartDescription("pca-box", "pca", "PCA visualization showing principal components and explained variance"), 100);
+  setTimeout(() => addChartDescription("lr-box", "linear_regression", "Linear regression analysis showing model performance and feature importance"), 100);
+}
+
+/* ---------- Time Series ---------- */
+function renderTimeSeries(){
+  const ts=lsGet("time_series")||lsGet("autoBundle")?.time_series;
+  const box=$("time-series-box")||$("time-series-container"); if(!box) return;
+  
+  console.log("Time series data:", ts); // Debug output
+  
+  if(!ts || (!ts.trends && !ts.seasonal_patterns && !ts.decomposition)) { 
+    box.innerHTML="<p class='text-small text-dim'>No time series data available. Try running Auto Explore or time series analysis.</p>"; 
+    return; 
+  }
+  
+  let html = "<div class='time-series-results'>";
+  
+  // Show trends
+  if (ts.trends && ts.trends.length > 0) {
+    html += "<div class='ts-section'><h4>Detected Trends</h4><ul>";
+    ts.trends.forEach(trend => {
+      html += `<li>${trend}</li>`;
+    });
+    html += "</ul></div>";
+  }
+  
+  // Show seasonal patterns
+  if (ts.seasonal_patterns && ts.seasonal_patterns.length > 0) {
+    html += "<div class='ts-section'><h4>Seasonal Patterns</h4><ul>";
+    ts.seasonal_patterns.forEach(pattern => {
+      html += `<li>${pattern}</li>`;
+    });
+    html += "</ul></div>";
+  }
+  
+  // Show decomposition results
+  if (ts.decomposition) {
+    html += "<div class='ts-section'><h4>Time Series Components</h4>";
+    html += `<p><strong>Trend Component:</strong> ${ts.decomposition.trend_summary || 'Analyzed'}</p>`;
+    html += `<p><strong>Seasonal Component:</strong> ${ts.decomposition.seasonal_summary || 'Analyzed'}</p>`;
+    html += `<p><strong>Residual Component:</strong> ${ts.decomposition.residual_summary || 'Analyzed'}</p>`;
+    html += "</div>";
+  }
+  
+  // Show any statistics
+  if (ts.statistics) {
+    html += "<div class='ts-section'><h4>Time Series Statistics</h4>";
+    Object.entries(ts.statistics).forEach(([key, value]) => {
+      html += `<p><strong>${key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:</strong> ${typeof value === 'number' ? value.toFixed(4) : value}</p>`;
+    });
+    html += "</div>";
+  }
+  
+  html += "</div>";
+  box.innerHTML = html;
+  
+  // Add AI description
+  setTimeout(() => addChartDescription("time-series-box", "time_series", "Time series analysis showing trends, seasonal patterns, and temporal decomposition"), 100);
 }
 
 /* ---------- KMeans ---------- */
@@ -1281,7 +1294,7 @@ function renderAINarrative(){
       if (bundle) {
         const analyses = [];
         if (bundle.correlation_matrix) analyses.push("correlation patterns");
-        if (bundle.pca) analyses.push("dimensionality reduction (PCA)");
+        if (bundle.time_series) analyses.push("time series analysis");
         if (bundle.kmeans) analyses.push("clustering analysis");
         if (bundle.categorical) analyses.push("categorical distributions");
         if (bundle.summary) analyses.push("statistical summaries");
@@ -1344,7 +1357,7 @@ function renderAINarrative(){
       html += list("Key Findings", ai.key_findings || ai.key_points);
       html += list("Correlations", ai.correlations_comment ? [ai.correlations_comment] : []);
       html += list("Clusters", ai.clusters_comment ? [ai.clusters_comment] : []);
-      html += list("PCA Insights", ai.pca_comment ? [ai.pca_comment] : []);
+      html += list("Time Series Insights", ai.time_series_comment ? [ai.time_series_comment] : []);
       html += list("Categorical Insights", ai.categorical_insights);
       html += list("Potential Issues", ai.potential_issues || ai.anomalies);
       
@@ -1560,12 +1573,12 @@ document.addEventListener("DOMContentLoaded", async ()=>{
         const on=b===btn; b.classList.toggle("active",on); b.setAttribute("aria-selected",on?"true":"false");
       });
       const secs={overview:"sec-overview",value_counts:"sec-value_counts",correlation:"sec-correlation",
-                  pca:"sec-pca",kmeans:"sec-kmeans",assoc:"sec-assoc",summary:"sec-summary",ai:"sec-ai"};
+                  time_series:"sec-time-series",kmeans:"sec-kmeans",assoc:"sec-assoc",summary:"sec-summary",ai:"sec-ai"};
       Object.entries(secs).forEach(([k,id])=>$(id)?.classList.toggle("active",k===tab));
 
       if(tab==="value_counts") renderValueCounts();
       if(tab==="correlation")  ensureCorrelation();
-      if(tab==="pca")          renderPCA();
+      if(tab==="time_series")  renderTimeSeries();
       if(tab==="kmeans")       renderKMeans();
       if(tab==="assoc")        renderAssoc();
       if(tab==="summary")      renderSummary();
@@ -1600,7 +1613,7 @@ window.renderValueCounts=renderValueCounts;
 window.renderInteractiveCorrelation=renderInteractiveCorrelation;
 window.renderCorrTable=renderCorrTable;
 window.ensureCorrelation=ensureCorrelation;
-window.renderPCA=renderPCA;
+window.renderTimeSeries=renderTimeSeries;
 window.renderKMeans=renderKMeans;
 window.renderAssoc=renderAssoc;
 window.renderSummary=renderSummary;
