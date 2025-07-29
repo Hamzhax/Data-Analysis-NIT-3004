@@ -839,8 +839,6 @@ def ai_chart_description():
         # Fallback if AI fails
         if not description:
             fallbacks = {
-                "time_series": "Time series analysis identifies trends and patterns over time, using moving averages to smooth data and reveal underlying temporal behavior.",
-                "linear_regression": "Linear regression models relationships between variables, predicting target values based on feature patterns with R² indicating model accuracy.",
                 "kmeans": "K-means groups similar data points into clusters, revealing natural patterns and segments in your data.",
                 "correlation": "Correlation analysis shows how variables relate to each other, with values closer to 1 or -1 indicating stronger relationships.",
                 "value_counts": "Value counts show the frequency of different categories, helping identify the most and least common values.",
@@ -854,8 +852,6 @@ def ai_chart_description():
         app.logger.exception("AI chart description failed")
         # Return fallback on error
         fallbacks = {
-            "time_series": "Time series analysis identifies trends and patterns over time, using moving averages to smooth data and reveal underlying temporal behavior.",
-            "linear_regression": "Linear regression models relationships between variables, predicting target values based on feature patterns with R² indicating model accuracy.",
             "kmeans": "K-means groups similar data points into clusters, revealing natural patterns and segments in your data.",
             "correlation": "Correlation analysis shows how variables relate to each other, with values closer to 1 or -1 indicating stronger relationships.",
             "value_counts": "Value counts show the frequency of different categories, helping identify the most and least common values.",
