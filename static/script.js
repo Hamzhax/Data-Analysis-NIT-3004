@@ -332,12 +332,29 @@ async function buildAISnippet(maxRows=20){
     genericDesc
   };
 }
-const stripFences = str => typeof str==="string"
-  ? str.replace(/```json|```/gi,"")
-       .replace(/^\s*"{?\s*json"?\s*[:{]/i,"{")
-       .replace(/^\s*json\s*[:{]/i,"{")
-       .trim()
-  : str;
+const stripFences = str => {
+  if (typeof str !== "string") return str;
+  
+  // Remove markdown fences and JSON labels
+  let cleaned = str
+    .replace(/```json|```/gi, "")
+    .replace(/^\s*"{?\s*json"?\s*[:{]/i, "{")
+    .replace(/^\s*json\s*[:{]/i, "{")
+    .trim();
+  
+  // If it starts with { "summary": remove the leading { "summary":
+  cleaned = cleaned.replace(/^\{\s*"summary"\s*:\s*"/, "");
+  
+  // If it ends with closing quotes and brace, remove them
+  cleaned = cleaned.replace(/"\s*\}\s*$/, "");
+  
+  // Clean up extra quotes around the content
+  if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+    cleaned = cleaned.slice(1, -1);
+  }
+  
+  return cleaned;
+};
 
 function cleanAIBlock(objOrStr){
   if(typeof objOrStr === "string"){
@@ -401,8 +418,32 @@ Return STRICT JSON with keys exactly:
       data={summary:data.summary,key_points:data.key_points,anomalies:data.anomalies,recommendation:data.recommendation};
     }
     if(typeof data==="string"){
-      const cleaned=stripFences(data);
-      try{ data=JSON.parse(cleaned); }catch{ data={summary:cleaned}; }
+      let cleaned=stripFences(data);
+      
+      // Enhanced cleaning for various response formats
+      // Remove common prefixes that might appear
+      cleaned = cleaned
+        .replace(/^\s*{\s*"summary"\s*:\s*"?/i, '')  // Remove { "summary": "
+        .replace(/"?\s*}\s*$/i, '')                   // Remove " }
+        .replace(/^"?\s*summary\s*[:=]\s*"?/i, '')   // Remove summary: or summary =
+        .replace(/^"?\s*response\s*[:=]\s*"?/i, '')  // Remove response: or response =
+        .replace(/^"?\s*text\s*[:=]\s*"?/i, '')      // Remove text: or text =
+        .trim();
+      
+      // If it looks like JSON, try to parse it
+      if (cleaned.startsWith('{') && cleaned.endsWith('}')) {
+        try{ 
+          const parsed = JSON.parse(cleaned);
+          data = parsed;
+        } catch (e) { 
+          console.warn("JSON parsing failed, treating as plain text:", e);
+          // If JSON parsing fails, treat as plain text
+          data = {summary: cleaned}; 
+        }
+      } else {
+        // It's plain text after cleaning
+        data = {summary: cleaned};
+      }
     }
     const safe={
       summary:stripFences(data?.summary||""),
@@ -1050,11 +1091,13 @@ function renderAINarrative(){
   const raw = lsGet("autoAI") || lsGet("lastAI");
   console.log("renderAINarrative - raw data:", raw);
   
-  if(!raw){
+  // Check for null/undefined or NoneType error
+  if(!raw || raw === null || raw === 'null' || 
+     (typeof raw === 'string' && (raw.includes("'NoneType'") || raw.includes("None") || raw.trim() === ""))){
     // Show a more informative generic paragraph about the data if no AI
     const meta = lsGet("meta") || lsGet("autoBundle")?.meta || lsGet("autoBundle")?.profile?.basic;
     const bundle = lsGet("autoBundle");
-    console.log("renderAINarrative - no AI data, showing generic message");
+    console.log("renderAINarrative - no valid AI data, showing generic message");
     console.log("renderAINarrative - meta:", meta);
     console.log("renderAINarrative - bundle:", bundle);
     
@@ -1095,7 +1138,7 @@ function renderAINarrative(){
   }
 
   // Handle error cases
-  if(raw.error) {
+  if(raw && raw.error) {
     let errorMsg = raw.error || "Unknown error";
     console.error("renderAINarrative - AI Error:", errorMsg);
     console.error("renderAINarrative - Full raw object:", raw);
@@ -1107,6 +1150,10 @@ function renderAINarrative(){
       errorMsg = "AI model package not available. Please install google-generativeai.";
     } else if (errorMsg.includes("initialization failed")) {
       errorMsg = "AI model failed to initialize. Please check your configuration.";
+    } else if (errorMsg.includes("'NoneType'") || errorMsg.includes("NoneType")) {
+      errorMsg = "AI analysis data is incomplete. Try running Auto Explore again.";
+    } else if (errorMsg.includes("object has no attribute 'get'")) {
+      errorMsg = "Data structure error in AI analysis. Please try running Auto Explore again.";
     }
     
     box.innerHTML = `<p class='text-small text-dim' style='color: #ef4444;'>⚠️ AI analysis encountered an error: ${errorMsg}</p>
@@ -1114,57 +1161,65 @@ function renderAINarrative(){
     return;
   }
 
-  const ai = cleanAIBlock(raw);
-  console.log("renderAINarrative - cleaned AI data:", ai);
+  try {
+    const ai = cleanAIBlock(raw);
+    console.log("renderAINarrative - cleaned AI data:", ai);
 
-  const list = (title, arr) =>
-    (arr && arr.length)
-      ? `<strong style="font-size:.62rem;">${title}</strong>
-         <ul style="font-size:.6rem;margin:.35rem 0 .6rem 1rem;">${arr.map(x=>`<li>${x}</li>`).join("")}</ul>`
-      : "";
+    const list = (title, arr) =>
+      (arr && arr.length)
+        ? `<strong style="font-size:.62rem;">${title}</strong>
+           <ul style="font-size:.6rem;margin:.35rem 0 .6rem 1rem;">${arr.map(x=>`<li>${x}</li>`).join("")}</ul>`
+        : "";
 
-  let html = "";
-  
-  // Handle different AI response structures
-  if(ai.overview) html += `<p style="font-size:.66rem;line-height:1.45;margin-bottom:.6rem;"><strong>Overview:</strong> ${ai.overview}</p>`;
-  else if(ai.summary) html += `<p style="font-size:.66rem;line-height:1.45;margin-bottom:.6rem;"><strong>Summary:</strong> ${ai.summary}</p>`;
-  
-  html += list("Key Findings", ai.key_findings || ai.key_points);
-  html += list("Correlations", ai.correlations_comment ? [ai.correlations_comment] : []);
-  html += list("Clusters", ai.clusters_comment ? [ai.clusters_comment] : []);
-  html += list("PCA Insights", ai.pca_comment ? [ai.pca_comment] : []);
-  html += list("Categorical Insights", ai.categorical_insights);
-  html += list("Potential Issues", ai.potential_issues || ai.anomalies);
-  
-  if(ai.recommendation){
-    html += `<p style="font-size:.6rem;"><strong>Recommendation:</strong> ${ai.recommendation}</p>`;
-  }
-  html += list("Next Steps", ai.next_steps);
-  html += list("Chart Priorities", ai.chart_priorities);
-
-  // If still no structured content, try to display raw content
-  if(!html.trim()){
-    console.warn("renderAINarrative - No structured content found, trying raw display");
-    if(typeof raw === "string"){
-      html = `<div style="font-size:.6rem;line-height:1.4;white-space:pre-wrap;">${raw}</div>`;
-    } else {
-      // Better formatting for unstructured data
-      const keys = Object.keys(raw);
-      html = keys.map(key => {
-        const value = raw[key];
-        if(Array.isArray(value) && value.length) {
-          return `<strong style="font-size:.62rem;">${key.replace(/_/g, ' ').toUpperCase()}:</strong>
-                  <ul style="font-size:.6rem;margin:.35rem 0 .6rem 1rem;">${value.map(x=>`<li>${x}</li>`).join("")}</ul>`;
-        } else if(typeof value === 'string' && value.trim()) {
-          return `<p style="font-size:.6rem;margin:.3rem 0;"><strong>${key.replace(/_/g, ' ')}:</strong> ${value}</p>`;
-        }
-        return '';
-      }).filter(x => x).join('') || "<em>AI narrative present but unstructured.</em>";
+    let html = "";
+    
+    // Handle different AI response structures
+    if(ai && ai.overview) html += `<p style="font-size:.66rem;line-height:1.45;margin-bottom:.6rem;"><strong>Overview:</strong> ${ai.overview}</p>`;
+    else if(ai && ai.summary) html += `<p style="font-size:.66rem;line-height:1.45;margin-bottom:.6rem;"><strong>Summary:</strong> ${ai.summary}</p>`;
+    
+    if(ai) {
+      html += list("Key Findings", ai.key_findings || ai.key_points);
+      html += list("Correlations", ai.correlations_comment ? [ai.correlations_comment] : []);
+      html += list("Clusters", ai.clusters_comment ? [ai.clusters_comment] : []);
+      html += list("PCA Insights", ai.pca_comment ? [ai.pca_comment] : []);
+      html += list("Categorical Insights", ai.categorical_insights);
+      html += list("Potential Issues", ai.potential_issues || ai.anomalies);
+      
+      if(ai.recommendation){
+        html += `<p style="font-size:.6rem;"><strong>Recommendation:</strong> ${ai.recommendation}</p>`;
+      }
+      html += list("Next Steps", ai.next_steps);
+      html += list("Chart Priorities", ai.chart_priorities);
     }
-  }
 
-  console.log("renderAINarrative - Final HTML length:", html.length);
-  box.innerHTML = html || "<em>AI narrative present but could not be parsed.</em>";
+    // If still no structured content, try to display raw content
+    if(!html.trim()){
+      console.warn("renderAINarrative - No structured content found, trying raw display");
+      if(typeof raw === "string"){
+        html = `<div style="font-size:.6rem;line-height:1.4;white-space:pre-wrap;">${raw}</div>`;
+      } else if(raw && typeof raw === "object") {
+        // Better formatting for unstructured data
+        const keys = Object.keys(raw);
+        html = keys.map(key => {
+          const value = raw[key];
+          if(Array.isArray(value) && value.length) {
+            return `<strong style="font-size:.62rem;">${key.replace(/_/g, ' ').toUpperCase()}:</strong>
+                    <ul style="font-size:.6rem;margin:.35rem 0 .6rem 1rem;">${value.map(x=>`<li>${x}</li>`).join("")}</ul>`;
+          } else if(typeof value === 'string' && value.trim()) {
+            return `<p style="font-size:.6rem;margin:.3rem 0;"><strong>${key.replace(/_/g, ' ')}:</strong> ${value}</p>`;
+          }
+          return '';
+        }).filter(x => x).join('') || "<em>AI narrative present but unstructured.</em>";
+      }
+    }
+
+    console.log("renderAINarrative - Final HTML length:", html.length);
+    box.innerHTML = html || "<em>AI narrative present but could not be parsed.</em>";
+    
+  } catch(err) {
+    console.error("renderAINarrative - Error processing AI data:", err);
+    box.innerHTML = `<p class='text-small text-dim' style='color: #ef4444;'>⚠️ Error displaying AI insights: ${err.message}</p>`;
+  }
 }
 
 /* ---------- Overview ---------- */
