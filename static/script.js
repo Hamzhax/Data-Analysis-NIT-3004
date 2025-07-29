@@ -527,11 +527,21 @@ function storeAutoBundle(result){
   if(b?.pca) {
     const pcaData = {
       components_2d: b.pca.components_2d,
+      components: b.pca.components_2d, // Store both for compatibility
       explained: b.pca.explained_variance,
       explained_variance: b.pca.explained_variance // Store both keys for compatibility
     };
     console.log("Storing PCA data:", pcaData); // Debug log
+    console.log("Original PCA from bundle:", b.pca); // Debug original
     lsSet("pca", pcaData);
+    
+    // Also verify it was stored correctly
+    setTimeout(() => {
+      const stored = lsGet("pca");
+      console.log("Verified stored PCA data:", stored);
+    }, 100);
+  } else {
+    console.warn("No PCA data in bundle:", b);
   }
   
   // Store K-means data
@@ -590,6 +600,38 @@ async function downloadPdfReport(){
   
   const st=$("report-status")||$("viz-export-status");
   st&&(st.textContent="Generating PDF...");
+  
+  // Create and show prominent loading overlay
+  const overlay = document.createElement('div');
+  overlay.id = 'pdf-loading-overlay';
+  overlay.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+    background: rgba(15, 28, 38, 0.95); z-index: 9999; 
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(4px);
+  `;
+  overlay.innerHTML = `
+    <div style="
+      background: #0f1c26; border: 2px solid #02b2ff; border-radius: 16px; 
+      padding: 2rem; text-align: center; max-width: 400px; width: 90%;
+      box-shadow: 0 20px 40px rgba(2, 178, 255, 0.3);
+    ">
+      <div style="
+        width: 60px; height: 60px; border: 4px solid #1d3140; 
+        border-top: 4px solid #02b2ff; border-radius: 50%; 
+        margin: 0 auto 1.5rem; animation: spin 1s linear infinite;
+      "></div>
+      <h3 style="margin: 0 0 0.5rem; color: #e7f2fb; font-size: 1.1rem;">Generating PDF Report</h3>
+      <p style="margin: 0; color: #a9bfd1; font-size: 0.9rem;">
+        Processing your data analysis...
+      </p>
+    </div>
+    <style>
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+  `;
+  document.body.appendChild(overlay);
+  
   try{
     const res=await fetch(`${BASE_URL}/api/report/pdf`,{credentials:"include"});
     if(!res.ok) throw new Error("PDF failed");
@@ -616,6 +658,10 @@ async function downloadPdfReport(){
   }catch(e){ st&&(st.textContent="Error"); toast("PDF error: "+e.message,"error"); }
   finally {
     window._pdfDownloadInProgress = false;
+    // Remove loading overlay
+    if (overlay && document.body.contains(overlay)) {
+      document.body.removeChild(overlay);
+    }
   }
 }
 function downloadBlob(blob,filename){
@@ -923,18 +969,70 @@ function renderPCA(){
   
   console.log("PCA data from storage:", pca); // Debug output
   console.log("AutoBundle:", lsGet("autoBundle")); // Debug output
+  console.log("AutoBundle PCA:", lsGet("autoBundle")?.pca); // Debug output
   
   const comps=pca?.components_2d || pca?.components;
+  console.log("Components:", comps); // Debug components
+  
   if(!pca || !comps || !Array.isArray(comps) || comps.length === 0){ 
     const bundle = lsGet("autoBundle");
-    if(bundle && bundle.pca) {
-      box.innerHTML="<p class='text-small text-dim'>PCA data exists but components are not available. This might indicate insufficient numeric data for dimensionality reduction.</p>"; 
+    console.log("PCA data check - Bundle exists:", !!bundle, "Bundle PCA:", bundle?.pca, "Components:", bundle?.pca?.components_2d);
+    
+    if(bundle && bundle.pca && bundle.pca.components_2d && bundle.pca.components_2d.length > 0) {
+      // PCA data exists in bundle but not being extracted properly
+      console.log("Found PCA data in bundle, attempting to render...");
+      const bundleComps = bundle.pca.components_2d;
+      const bundlePCA = bundle.pca;
+      
+      // Render using bundle data directly
+      let pts=bundleComps.map(p=>({x:p[0],y:p[1]}));
+      function getBounds(arr, key) {
+        const vals = arr.map(o=>o[key]).sort((a,b)=>a-b);
+        const q = p => vals[Math.floor(p*vals.length)];
+        return [q(0.01), q(0.99)];
+      }
+      let [minX,maxX]=getBounds(pts,'x'), [minY,maxY]=getBounds(pts,'y');
+      const pad = (min,max) => { const d=max-min; return [min-0.1*d,max+0.1*d]; };
+      [minX,maxX]=pad(minX,maxX); [minY,maxY]=pad(minY,maxY);
+      box.innerHTML="<canvas id='pca-canvas' style='width:100%;height:100%'></canvas>";
+      const ctx=$("pca-canvas").getContext("2d");
+      if(VizCharts.pca) VizCharts.pca.destroy();
+      VizCharts.pca=new Chart(ctx,{type:"scatter",
+        data:{datasets:[{label:"PCA",data:pts,backgroundColor:"#3b82f6",borderColor:"#1d4ed8"}]},
+        options:{responsive:true,plugins:{legend:{display:false}},
+          scales:{
+            x:{min:minX,max:maxX,ticks:{color:getCss('--text-dim')},title:{display:true,text:"PC1"}},
+            y:{min:minY,max:maxY,ticks:{color:getCss('--text-dim')},title:{display:true,text:"PC2"}}
+          }
+        }
+      });
+      
+      // Show explained variance if available
+      if(bundlePCA?.explained_variance || bundlePCA?.explained) {
+        const variance = bundlePCA.explained_variance || bundlePCA.explained;
+        if(variance && variance.length >= 2) {
+          const pc1_var = (variance[0] * 100).toFixed(1);
+          const pc2_var = (variance[1] * 100).toFixed(1);
+          const total_var = ((variance[0] + variance[1]) * 100).toFixed(1);
+          
+          const infoDiv = document.createElement('div');
+          infoDiv.className = 'text-small text-dim';
+          infoDiv.style.marginTop = '0.5rem';
+          infoDiv.innerHTML = `PC1: ${pc1_var}% | PC2: ${pc2_var}% | Total: ${total_var}% variance explained`;
+          box.appendChild(infoDiv);
+        }
+      }
+      
+      syncExportButtons();
+      setTimeout(() => addChartDescription("pca-box", "pca", "PCA visualization showing principal components and explained variance"), 100);
+      return;
     } else {
       box.innerHTML="<p class='text-small text-dim'>No PCA data available. Try running Auto Explore first to generate principal component analysis.</p>"; 
     }
     return; 
   }
-  // Robust scaling: trim outliers, pad axes
+  
+  // Regular PCA rendering when data is available
   let pts=comps.map(p=>({x:p[0],y:p[1]}));
   // Outlier trimming (1st-99th percentile)
   function getBounds(arr, key) {
