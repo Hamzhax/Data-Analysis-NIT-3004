@@ -159,10 +159,6 @@ def slim_bundle(bundle):
     if "assoc_rules" in out and len(out["assoc_rules"]) > 100:
         out["assoc_rules"] = out["assoc_rules"][:100]
     
-    # Time Series - keep limited data
-    if "time_series" in bundle:
-        out["time_series"] = bundle["time_series"]
-    
     # K-means - keep all data, it's already limited to 300 points  
     if "kmeans" in bundle:
         out["kmeans"] = bundle["kmeans"]
@@ -689,7 +685,7 @@ def coltypes():
         return fail(str(e), 500)
 
 # ---------- ANALYZE ----------
-VALID_METHODS = {"summary", "correlation", "value_counts", "time_series", "kmeans", "assoc_rules"}
+VALID_METHODS = {"summary", "correlation", "value_counts", "kmeans", "assoc_rules"}
 
 @app.post("/api/analyze")
 def analyze():
@@ -726,70 +722,6 @@ def analyze():
             if not column or column not in df.columns: return fail("Column missing/invalid.")
             counts = df[column].astype(str).value_counts().head(50)
             return ok(method=method, labels=counts.index.tolist(), values=counts.tolist(), title=f"Value Counts {column}")
-
-        if method == "linear_regression":
-            num = df.select_dtypes(include="number").dropna()
-            if num.shape[1] < 2: return fail("Need >=2 numeric columns.")
-            from sklearn.linear_model import LinearRegression
-            from sklearn.metrics import r2_score, mean_squared_error
-            
-            # Use first column as target, others as features
-            target_col = num.columns[0]
-            feature_cols = num.columns[1:]
-            
-            X = num[feature_cols]
-            y = num[target_col]
-            
-            lr = LinearRegression()
-            lr.fit(X, y)
-            predictions = lr.predict(X)
-            
-            # Calculate metrics
-            r2 = r2_score(y, predictions)
-            mse = mean_squared_error(y, predictions)
-            
-            # Feature importance (coefficients)
-            coefficients = [{
-                "feature": col,
-                "coefficient": float(coef)
-            } for col, coef in zip(feature_cols, lr.coef_)]
-            
-            return ok(method=method,
-                      r2_score=float(r2),
-                      mse=float(mse),
-                      intercept=float(lr.intercept_),
-                      coefficients=coefficients,
-                      target_column=target_col,
-                      feature_columns=feature_cols.tolist())
-
-        if method == "time_series":
-            # Simple time series analysis - detect trends and patterns
-            num = df.select_dtypes(include="number").dropna()
-            if num.empty: return fail("No numeric columns for time series.")
-            
-            # Use the first numeric column for time series analysis
-            col = num.columns[0]
-            values = num[col].values
-            
-            # Calculate moving averages and trends
-            window_size = min(7, len(values) // 4) if len(values) > 10 else 3
-            
-            # Simple moving average
-            moving_avg = []
-            for i in range(len(values)):
-                start = max(0, i - window_size + 1)
-                moving_avg.append(float(values[start:i+1].mean()))
-            
-            # Trend analysis (simple linear trend)
-            x = list(range(len(values)))
-            y = values.tolist()
-            
-            return ok(method=method,
-                      values=[float(v) for v in values[:300]],  # Limit to 300 points
-                      moving_average=moving_avg[:300],
-                      indices=x[:300],
-                      column=col,
-                      trend_direction="increasing" if len(values) > 1 and values[-1] > values[0] else "decreasing")
 
         if method == "kmeans":
             num = df.select_dtypes(include="number").dropna()
@@ -890,8 +822,6 @@ def ai_chart_description():
     
     # Create tailored prompts for different chart types
     prompts = {
-        "time_series": "Explain time series analysis in 1-2 sentences focusing on trend detection and temporal patterns.",
-        "linear_regression": "Explain linear regression in 1-2 sentences focusing on predicting target variables and feature relationships.",
         "kmeans": "Explain K-means clustering in 1-2 sentences focusing on grouping similar data points.",
         "correlation": "Explain correlation analysis in 1-2 sentences focusing on relationships between variables.",
         "value_counts": "Explain value counts analysis in 1-2 sentences focusing on frequency distribution of categories.",
@@ -984,79 +914,6 @@ def build_auto_bundle(filename):
         pairs.sort(key=lambda x: abs(x[2]), reverse=True)
         top_correlations = pairs[:15]
 
-    # Linear Regression
-    lr_result = None
-    if num_df.shape[1] >= 2 and num_df.dropna().shape[0] > 5:
-        nd = num_df.dropna()
-        try:
-            from sklearn.linear_model import LinearRegression
-            from sklearn.metrics import r2_score, mean_squared_error
-            
-            # Use first column as target, others as features
-            target_col = nd.columns[0]
-            feature_cols = nd.columns[1:]
-            
-            X = nd[feature_cols]
-            y = nd[target_col]
-            
-            lr = LinearRegression()
-            lr.fit(X, y)
-            predictions = lr.predict(X)
-            
-            # Calculate metrics
-            r2 = r2_score(y, predictions)
-            mse = mean_squared_error(y, predictions)
-            
-            # Feature importance (coefficients)
-            coefficients = [{
-                "feature": col,
-                "coefficient": float(coef)
-            } for col, coef in zip(feature_cols, lr.coef_)]
-            
-            lr_result = {
-                "r2_score": float(r2),
-                "mse": float(mse),
-                "intercept": float(lr.intercept_),
-                "coefficients": coefficients,
-                "target_column": target_col,
-                "feature_columns": feature_cols.tolist()
-            }
-        except Exception:
-            lr_result = None
-
-    # Time Series Analysis
-    ts_result = None
-    if num_df.shape[1] >= 1 and num_df.dropna().shape[0] > 10:
-        nd = num_df.dropna()
-        try:
-            # Use the first numeric column for time series analysis
-            col = nd.columns[0]
-            values = nd[col].values
-            
-            # Calculate moving averages and trends
-            window_size = min(7, len(values) // 4) if len(values) > 10 else 3
-            
-            # Simple moving average
-            moving_avg = []
-            for i in range(len(values)):
-                start = max(0, i - window_size + 1)
-                moving_avg.append(float(values[start:i+1].mean()))
-            
-            # Trend analysis (simple linear trend)
-            x = list(range(len(values)))
-            y = values.tolist()
-            
-            ts_result = {
-                "values": [float(v) for v in values[:300]],  # Limit to 300 points
-                "moving_average": moving_avg[:300],
-                "indices": x[:300],
-                "column": col,
-                "trend_direction": "increasing" if len(values) > 1 and values[-1] > values[0] else "decreasing",
-                "window_size": window_size
-            }
-        except Exception:
-            ts_result = None
-
     # KMeans
     kmeans_result = None
     if num_df.shape[1] >= 2 and num_df.dropna().shape[0] >= 30:
@@ -1138,8 +995,6 @@ def build_auto_bundle(filename):
     rec_charts = []
     if numeric_info:       rec_charts.append({"type": "histogram",            "reason": "Distribution"})
     if correlation_matrix: rec_charts.append({"type": "correlation_heatmap",  "reason": "Relationships"})
-    if lr_result:          rec_charts.append({"type": "linear_regression",     "reason": "Predictive modeling"})
-    if ts_result:          rec_charts.append({"type": "time_series",           "reason": "Trend analysis"})
     if kmeans_result:      rec_charts.append({"type": "cluster_scatter",      "reason": f"Clusters k={kmeans_result['k']}"})
     if categorical_info:
         first = list(categorical_info.keys())[:2]
@@ -1165,8 +1020,6 @@ def build_auto_bundle(filename):
         "correlation_truncated": truncated,
         "correlation_kept_columns": kept_cols,
         "correlation_original_side": original_side,
-        "linear_regression": lr_result,
-        "time_series": ts_result,
         "kmeans": kmeans_result,
         "assoc_rules": assoc_result,
         "recommended_charts": rec_charts
@@ -1235,8 +1088,6 @@ Return a JSON response with the following structure (ensure valid JSON format):
   ],
   "correlations_comment": "Insight about the correlation patterns found" or null,
   "clusters_comment": "Insight about the clustering results" or null,
-  "linear_regression_comment": "Insight about the linear regression analysis" or null,
-  "time_series_comment": "Insight about the time series trends and patterns" or null,
   "categorical_insights": [
     "Insight 1 about categorical data patterns",
     "Insight 2 about distributions",
@@ -1290,13 +1141,10 @@ Respond with ONLY the JSON object, no other text.
                     f"Dataset contains {brief.get('basic', {}).get('numeric_cols', 0)} numeric and {brief.get('basic', {}).get('categorical_cols', 0)} categorical variables",
                     f"Found {len(brief.get('top_correlations', []))} significant correlations",
                     f"Clustering analysis {'completed' if brief.get('kmeans') else 'not available'}",
-                    f"Time series analysis {'completed' if brief.get('time_series') else 'not available'}",
                     "Analysis completed with automated insights"
                 ],
                 "correlations_comment": "Correlation analysis completed" if brief.get("top_correlations") else None,
-                "clusters_comment": f"Identified {brief.get('kmeans_k', 'unknown')} clusters" if brief.get("kmeans_k") else None,
-                "linear_regression_comment": "Linear regression analysis completed" if brief.get("linear_regression") else None,
-                "time_series_comment": "Time series analysis completed" if brief.get("time_series") else None,
+                "clusters_comment": f"Identified {brief.get('kmeans', {}).get('k', 'unknown')} clusters" if brief.get("kmeans") else None,
                 "categorical_insights": [
                     f"Found {len(brief.get('categorical_cols', []))} categorical variables",
                     "Distribution analysis completed",

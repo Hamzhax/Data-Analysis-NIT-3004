@@ -2,7 +2,13 @@
 <html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
-  <title>Data Dashboard – Analys        <select id="analysis-method" class="input">
+  <title>Data Dashboard – Analys          <p>Full exploratory pipeline: profiling, stats, correlation, KMeans, association rules & AI narrative. You'll be taken to Visualize when it's done.</p>            <select id="analysis-method" class="input">
+          <option value="summary">📊 Summary Statistics</option>
+          <option value="correlation">🔗 Correlation Matrix</option>
+          <option value="value_counts">🎯 Value Counts (needs target column)</option>
+          <option value="kmeans">🔄 K-Means Clustering</option>
+          <option value="assoc_rules">🔗 Association Rules (needs categorical data)</option>
+        </select> id="analysis-method" class="input">
           <option value="summary">📊 Summary Statistics</option>
           <option value="correlation">🔗 Correlation Matrix</option>
           <option value="value_counts">🎯 Value Counts (needs target column)</option>
@@ -168,7 +174,6 @@
           <option value="overview">Overview</option>
           <option value="value_counts">Value Counts</option>
           <option value="correlation heatmap">Correlation Heatmap</option>
-          <option value="time series">Time Series Analysis</option>
           <option value="kmeans clustering">KMeans Clustering</option>
           <option value="association rules">Association Rules</option>
         </select>

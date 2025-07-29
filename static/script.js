@@ -32,7 +32,6 @@ window.downloadChart = downloadChart;
 window.exportDataCsv = exportDataCsv;
 window.renderOverview = renderOverview;
 window.renderAINarrative = renderAINarrative;
-window.renderLinearRegression = renderLinearRegression;
 window.renderKMeans = renderKMeans;
 window.renderValueCounts = renderValueCounts;
 window.renderCorrTable = renderCorrTable;
@@ -82,7 +81,7 @@ if (!BASE_URL) {
 window.BASE_URL = BASE_URL;
 
 const LS_KEYS_TO_CLEAR = [
-  "summary","correlation","valueCounts","linear_regression","kmeans","assoc",
+  "summary","correlation","valueCounts","kmeans","assoc",
   "autoBundle","autoAI","lastAI","colTypesCache","primaryCategorical"
 ];
 
@@ -276,13 +275,6 @@ async function runAnalysis(){
       case "summary":      lsSet("summary",data.summary); inferColumnTypes(); break;
       case "correlation":  lsSet("correlation",compressCorr(data.correlation)); break;
       case "value_counts": lsSet("valueCounts",{labels:data.labels,values:data.values,title:data.title}); break;
-      case "time_series": lsSet("time_series",{
-        values: data.values,
-        moving_average: data.moving_average,
-        indices: data.indices,
-        column: data.column,
-        trend_direction: data.trend_direction
-      }); break;
       case "kmeans":       lsSet("kmeans",{
         labels_preview:data.labels,
         labels:data.labels,
@@ -726,13 +718,21 @@ async function addChartDescription(containerId, chartType, fallbackText) {
   const container = $(containerId);
   if (!container) return;
   
-  // Remove existing description
+  // Check if we already have a recent description to prevent duplicates
   const existingDesc = container.querySelector('.ai-chart-description');
-  if (existingDesc) existingDesc.remove();
+  if (existingDesc) {
+    // If the description was added recently (within 2 seconds), don't add another
+    const timestamp = existingDesc.dataset.timestamp;
+    if (timestamp && (Date.now() - parseInt(timestamp)) < 2000) {
+      return;
+    }
+    existingDesc.remove();
+  }
   
   // Create description element
   const descDiv = document.createElement('div');
   descDiv.className = 'ai-chart-description';
+  descDiv.dataset.timestamp = Date.now().toString();
   descDiv.style.cssText = 'margin-top:0.8rem;padding:0.6rem;background:#0a1520;border:1px solid #1a2f42;border-radius:6px;font-size:0.6rem;color:#a5b8c9;line-height:1.4;';
   descDiv.innerHTML = `<div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.4rem;"><span style="color:#6ea8fe;">🤖</span><strong style="color:#d1e7dd;">AI Insight</strong></div><div class="ai-desc-content">${fallbackText}</div>`;
   
@@ -787,7 +787,7 @@ async function adminLoadUsers(){
   if(!window.Chart) await load("https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js");
   if(!Chart.controllers?.matrix) await load("https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@1.4.0/dist/chartjs-chart-matrix.min.js");
 })();
-const VizCharts={ valueCounts:null, timeSeries:null, kmeans:null };
+const VizCharts={ valueCounts:null, kmeans:null };
 function getCss(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim()||"#94a3b8"; }
 
 /* ---------- Value Counts ---------- */
@@ -1006,135 +1006,6 @@ function copyToClipboard(txt){
   else{ const ta=document.createElement("textarea"); ta.value=txt; document.body.appendChild(ta); ta.select(); try{document.execCommand("copy");}catch{} ta.remove(); }
 }
 
-/* ---------- Linear Regression ---------- */
-function renderLinearRegression(){
-  const lr=lsGet("linear_regression")||lsGet("autoBundle")?.linear_regression;
-  const box=$("lr-box")||$("linear-regression-box")||$("time-series-box"); if(!box) return;
-  
-  console.log("Linear Regression data from storage:", lr); // Debug output
-  
-  if(!lr){ 
-    box.innerHTML="<p class='text-small text-dim'>No Linear Regression data available. Try running Auto Explore or Linear Regression analysis.</p>"; 
-    return; 
-  }
-  
-  // Create regression results display
-  let html = `
-    <div class="lr-results">
-      <div class="lr-metrics" style="background:#0a1520;border:1px solid #1a2f42;border-radius:6px;padding:0.8rem;margin-bottom:1rem;">
-        <h4 style="margin:0 0 0.5rem;color:#e7f2fb;font-size:0.8rem;">Model Performance</h4>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;font-size:0.7rem;">
-          <div>
-            <span style="color:#a5b8c9;">R² Score:</span>
-            <strong style="color:#6ea8fe;margin-left:0.5rem;">${(lr.r2_score * 100).toFixed(2)}%</strong>
-          </div>
-          <div>
-            <span style="color:#a5b8c9;">MSE:</span>
-            <strong style="color:#f59e0b;margin-left:0.5rem;">${lr.mse.toFixed(4)}</strong>
-          </div>
-        </div>
-        <div style="margin-top:0.5rem;font-size:0.65rem;color:#9fb3c3;">
-          <span style="color:#a5b8c9;">Target:</span> <strong>${lr.target_column}</strong>
-        </div>
-      </div>
-      
-      <div class="lr-coefficients" style="background:#0a1520;border:1px solid #1a2f42;border-radius:6px;padding:0.8rem;">
-        <h4 style="margin:0 0 0.5rem;color:#e7f2fb;font-size:0.8rem;">Feature Coefficients</h4>
-        <div class="coef-list" style="max-height:200px;overflow-y:auto;">
-  `;
-  
-  // Add intercept
-  html += `
-    <div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid #1a2f42;font-size:0.65rem;">
-      <span style="color:#a5b8c9;">Intercept</span>
-      <strong style="color:#d1e7dd;">${lr.intercept.toFixed(4)}</strong>
-    </div>
-  `;
-  
-  // Add coefficients
-  if(lr.coefficients && lr.coefficients.length > 0) {
-    lr.coefficients.forEach(coef => {
-      const absCoef = Math.abs(coef.coefficient);
-      const color = absCoef > 0.1 ? '#6ea8fe' : absCoef > 0.01 ? '#f59e0b' : '#9fb3c3';
-      html += `
-        <div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid #1a2f42;font-size:0.65rem;">
-          <span style="color:#a5b8c9;">${coef.feature}</span>
-          <strong style="color:${color};">${coef.coefficient.toFixed(4)}</strong>
-        </div>
-      `;
-    });
-  }
-  
-  html += `
-        </div>
-      </div>
-    </div>
-  `;
-  
-  box.innerHTML = html;
-  syncExportButtons();
-  
-  // Add AI description
-  setTimeout(() => addChartDescription("lr-box", "linear_regression", "Linear regression analysis showing model performance and feature importance"), 100);
-}
-
-/* ---------- Time Series ---------- */
-function renderTimeSeries(){
-  const ts=lsGet("time_series")||lsGet("autoBundle")?.time_series;
-  const box=$("time-series-box")||$("time-series-container"); if(!box) return;
-  
-  console.log("Time series data:", ts); // Debug output
-  
-  if(!ts || (!ts.trends && !ts.seasonal_patterns && !ts.decomposition)) { 
-    box.innerHTML="<p class='text-small text-dim'>No time series data available. Try running Auto Explore or time series analysis.</p>"; 
-    return; 
-  }
-  
-  let html = "<div class='time-series-results'>";
-  
-  // Show trends
-  if (ts.trends && ts.trends.length > 0) {
-    html += "<div class='ts-section'><h4>Detected Trends</h4><ul>";
-    ts.trends.forEach(trend => {
-      html += `<li>${trend}</li>`;
-    });
-    html += "</ul></div>";
-  }
-  
-  // Show seasonal patterns
-  if (ts.seasonal_patterns && ts.seasonal_patterns.length > 0) {
-    html += "<div class='ts-section'><h4>Seasonal Patterns</h4><ul>";
-    ts.seasonal_patterns.forEach(pattern => {
-      html += `<li>${pattern}</li>`;
-    });
-    html += "</ul></div>";
-  }
-  
-  // Show decomposition results
-  if (ts.decomposition) {
-    html += "<div class='ts-section'><h4>Time Series Components</h4>";
-    html += `<p><strong>Trend Component:</strong> ${ts.decomposition.trend_summary || 'Analyzed'}</p>`;
-    html += `<p><strong>Seasonal Component:</strong> ${ts.decomposition.seasonal_summary || 'Analyzed'}</p>`;
-    html += `<p><strong>Residual Component:</strong> ${ts.decomposition.residual_summary || 'Analyzed'}</p>`;
-    html += "</div>";
-  }
-  
-  // Show any statistics
-  if (ts.statistics) {
-    html += "<div class='ts-section'><h4>Time Series Statistics</h4>";
-    Object.entries(ts.statistics).forEach(([key, value]) => {
-      html += `<p><strong>${key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:</strong> ${typeof value === 'number' ? value.toFixed(4) : value}</p>`;
-    });
-    html += "</div>";
-  }
-  
-  html += "</div>";
-  box.innerHTML = html;
-  
-  // Add AI description
-  setTimeout(() => addChartDescription("time-series-box", "time_series", "Time series analysis showing trends, seasonal patterns, and temporal decomposition"), 100);
-}
-
 /* ---------- KMeans ---------- */
 function renderKMeans(){
   const km=lsGet("kmeans")||lsGet("autoBundle")?.kmeans;
@@ -1294,7 +1165,6 @@ function renderAINarrative(){
       if (bundle) {
         const analyses = [];
         if (bundle.correlation_matrix) analyses.push("correlation patterns");
-        if (bundle.time_series) analyses.push("time series analysis");
         if (bundle.kmeans) analyses.push("clustering analysis");
         if (bundle.categorical) analyses.push("categorical distributions");
         if (bundle.summary) analyses.push("statistical summaries");
@@ -1357,7 +1227,6 @@ function renderAINarrative(){
       html += list("Key Findings", ai.key_findings || ai.key_points);
       html += list("Correlations", ai.correlations_comment ? [ai.correlations_comment] : []);
       html += list("Clusters", ai.clusters_comment ? [ai.clusters_comment] : []);
-      html += list("Time Series Insights", ai.time_series_comment ? [ai.time_series_comment] : []);
       html += list("Categorical Insights", ai.categorical_insights);
       html += list("Potential Issues", ai.potential_issues || ai.anomalies);
       
@@ -1573,12 +1442,11 @@ document.addEventListener("DOMContentLoaded", async ()=>{
         const on=b===btn; b.classList.toggle("active",on); b.setAttribute("aria-selected",on?"true":"false");
       });
       const secs={overview:"sec-overview",value_counts:"sec-value_counts",correlation:"sec-correlation",
-                  time_series:"sec-time-series",kmeans:"sec-kmeans",assoc:"sec-assoc",summary:"sec-summary",ai:"sec-ai"};
+                  kmeans:"sec-kmeans",assoc:"sec-assoc",summary:"sec-summary",ai:"sec-ai"};
       Object.entries(secs).forEach(([k,id])=>$(id)?.classList.toggle("active",k===tab));
 
       if(tab==="value_counts") renderValueCounts();
       if(tab==="correlation")  ensureCorrelation();
-      if(tab==="time_series")  renderTimeSeries();
       if(tab==="kmeans")       renderKMeans();
       if(tab==="assoc")        renderAssoc();
       if(tab==="summary")      renderSummary();
@@ -1613,7 +1481,6 @@ window.renderValueCounts=renderValueCounts;
 window.renderInteractiveCorrelation=renderInteractiveCorrelation;
 window.renderCorrTable=renderCorrTable;
 window.ensureCorrelation=ensureCorrelation;
-window.renderTimeSeries=renderTimeSeries;
 window.renderKMeans=renderKMeans;
 window.renderAssoc=renderAssoc;
 window.renderSummary=renderSummary;

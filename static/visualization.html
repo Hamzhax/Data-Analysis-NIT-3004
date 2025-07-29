@@ -229,7 +229,6 @@
         <button class="tab active" data-tab="overview" role="tab" aria-selected="true">Overview</button>
         <button class="tab" data-tab="value_counts" role="tab">Value Counts</button>
         <button class="tab" data-tab="correlation" role="tab">Correlation</button>
-        <button class="tab" data-tab="time_series" role="tab">Time Series</button>
         <button class="tab" data-tab="kmeans" role="tab">KMeans</button>
         <button class="tab" data-tab="assoc" role="tab">Assoc Rules</button>
         <button class="tab" data-tab="summary" role="tab">Summary</button>
@@ -291,17 +290,6 @@
           </div>
         </div>
         <div id="corr-tooltip"></div>
-      </section>
-
-      <!-- TIME SERIES -->
-      <section id="sec-time-series" class="viz-section" role="tabpanel">
-        <h3 class="section-title">Time Series Analysis
-          <span class="dl-wrap">
-            <button class="btn-outline btn-xsm" id="dl-time-series-png">PNG</button>
-            <button class="btn-outline btn-xsm" id="dl-time-series-csv">CSV</button>
-          </span>
-        </h3>
-        <div id="time-series-box" class="chart-box"></div>
       </section>
 
       <!-- KMeans -->
@@ -465,7 +453,6 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     if(tab==="overview")        renderOverview?.();
     else if(tab==="value_counts") renderValueCounts?.();
     else if(tab==="correlation")  ensureCorrelation?.();
-    else if(tab==="time_series")  renderTimeSeries?.();
     else if(tab==="kmeans")       renderKMeans?.();
     else if(tab==="assoc")        renderAssoc?.();
     else if(tab==="summary")      renderSummary?.();
@@ -478,15 +465,6 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   /* ---- per-section downloads (helpers are defined in script.js v4.6) ---- */
   bind("dl-vc-png", ()=>downloadChart?.("vc-canvas","value_counts"));
   bind("dl-vc-csv", exportDataCsv); // VC handled by exportDataCsv
-
-  bind("dl-time-series-png", ()=>downloadChart?.("time-series-canvas","time_series"));
-  bind("dl-time-series-csv", ()=>{
-    const ts=lsGet("time_series")||lsGet("autoBundle")?.time_series;
-    if(!ts) return toast("No time series data","warn");
-    const data = ts.trends || ts.seasonal_patterns || ["No data available"];
-    const rows = data.map((item, i) => `${i},${item}`).join("\n");
-    downloadBlob(new Blob(["idx,data\n"+rows],{type:"text/csv"}),"time_series_data.csv");
-  });
 
   bind("dl-km-png", ()=>downloadChart?.("kmeans-canvas","kmeans"));
   bind("dl-km-csv", ()=>{
