@@ -1016,14 +1016,31 @@ def ai_narrative_from_bundle(bundle):
             print(f"[AI] {error_msg}")
             return {"error": error_msg}
     
+    # Check if bundle is None or invalid
+    if not bundle or not isinstance(bundle, dict):
+        error_msg = f"Invalid bundle data: {type(bundle).__name__ if bundle is not None else 'None'}"
+        print(f"[AI] {error_msg}")
+        return {"error": error_msg, "overview": f"AI analysis encountered an error: {error_msg}"}
+    
+    # Check if bundle has required structure
+    if "profile" not in bundle or not isinstance(bundle.get("profile"), dict):
+        error_msg = "Bundle missing profile data"
+        print(f"[AI] {error_msg}")
+        return {"error": error_msg, "overview": f"AI analysis encountered an error: {error_msg}"}
+    
+    if "basic" not in bundle["profile"]:
+        error_msg = "Bundle missing basic profile data"
+        print(f"[AI] {error_msg}")
+        return {"error": error_msg, "overview": f"AI analysis encountered an error: {error_msg}"}
+    
     try:
         brief = {
             "basic": bundle["profile"]["basic"],
             "numeric_cols": list(bundle.get("numeric", {}).keys())[:6],
             "categorical_cols": list(bundle.get("categorical", {}).keys())[:6],
             "top_correlations": [{"a": a, "b": b, "corr": c} for a, b, c in bundle.get("top_correlations", [])[:10]],
-            "pca_var": bundle.get("pca", {}).get("explained_variance"),
-            "kmeans_k": bundle.get("kmeans", {}).get("k"),
+            "pca_var": bundle.get("pca", {}).get("explained_variance") if bundle.get("pca") else None,
+            "kmeans_k": bundle.get("kmeans", {}).get("k") if bundle.get("kmeans") else None,
             "rules_count": len(bundle.get("assoc_rules") or []) if bundle.get("assoc_rules") else 0
         }
         

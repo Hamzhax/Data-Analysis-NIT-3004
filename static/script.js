@@ -1154,6 +1154,8 @@ function renderAINarrative(){
       errorMsg = "AI analysis data is incomplete. Try running Auto Explore again.";
     } else if (errorMsg.includes("object has no attribute 'get'")) {
       errorMsg = "Data structure error in AI analysis. Please try running Auto Explore again.";
+    } else if (errorMsg.includes("Invalid bundle data") || errorMsg.includes("Bundle missing")) {
+      errorMsg = "Dataset analysis data is incomplete or corrupted. Please run Auto Explore again.";
     }
     
     box.innerHTML = `<p class='text-small text-dim' style='color: #ef4444;'>⚠️ AI analysis encountered an error: ${errorMsg}</p>
