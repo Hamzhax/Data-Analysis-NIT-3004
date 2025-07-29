@@ -440,7 +440,10 @@ async function autoExplore(){
   window._autoExploreRunning = true;
   prog&&(prog.textContent="Running auto exploration...");
   try{
+    console.log("[Auto Explore] Starting API call...");
     const res=await handleApi("/api/auto_explore",{method:"POST"});
+    console.log("[Auto Explore] API response:", res);
+    console.log("[Auto Explore] AI data:", res.ai);
     storeAutoBundle(res);
     prog&&(prog.textContent="Complete ✓");
     // Use a more robust toast prevention mechanism
@@ -454,6 +457,7 @@ async function autoExplore(){
       ensureCorrelation(); renderOverview(); renderAINarrative(); syncExportButtons();
     }
   }catch(e){
+    console.error("[Auto Explore] Error:", e);
     prog&&(prog.textContent="Error");
     toast("Auto explore failed: "+e.message,"error");
   } finally {
@@ -504,7 +508,27 @@ function storeAutoBundle(result){
   }
   
   if(b?.assoc_rules) lsSet("assoc",b.assoc_rules);
-  if(ai)         lsSet("autoAI", cleanAIBlock(ai));
+  
+  // Store AI data with better error handling
+  if(ai) {
+    console.log("Storing AI data:", ai);
+    if(ai.error) {
+      console.warn("AI generated with error:", ai.error);
+      // Store the error but also check if there's any useful content
+      if(ai.overview || ai.key_findings || ai.summary) {
+        console.log("AI has error but also has content, storing both");
+        lsSet("autoAI", cleanAIBlock(ai));
+      } else {
+        console.log("AI has only error, storing error info");
+        lsSet("autoAI", {error: ai.error});
+      }
+    } else {
+      lsSet("autoAI", cleanAIBlock(ai));
+    }
+  } else {
+    console.warn("No AI data received in auto explore response");
+    // Don't store anything, let renderAINarrative handle the missing data case
+  }
 }
 
 /* ---------------- Reports / Exports ---------------- */
@@ -1018,13 +1042,22 @@ function renderSummary(){
 /* ---------- AI Narrative render ---------- */
 function renderAINarrative(){
   const box = $("ai-narrative-box") || $("ai-latest");
-  if(!box) return;
+  if(!box) {
+    console.warn("renderAINarrative: No AI narrative box found");
+    return;
+  }
 
   const raw = lsGet("autoAI") || lsGet("lastAI");
+  console.log("renderAINarrative - raw data:", raw);
+  
   if(!raw){
     // Show a more informative generic paragraph about the data if no AI
     const meta = lsGet("meta") || lsGet("autoBundle")?.meta || lsGet("autoBundle")?.profile?.basic;
     const bundle = lsGet("autoBundle");
+    console.log("renderAINarrative - no AI data, showing generic message");
+    console.log("renderAINarrative - meta:", meta);
+    console.log("renderAINarrative - bundle:", bundle);
+    
     let summary = "<p class='text-dim' style='font-size: 0.9rem; line-height: 1.4;'>This dataset";
     
     if (meta && (meta.n_rows || meta.rows) && (meta.n_cols || meta.columns)) {
@@ -1063,11 +1096,26 @@ function renderAINarrative(){
 
   // Handle error cases
   if(raw.error) {
-    box.innerHTML = `<p class='text-small text-dim'>AI analysis encountered an error: ${raw.error}</p>`;
+    let errorMsg = raw.error || "Unknown error";
+    console.error("renderAINarrative - AI Error:", errorMsg);
+    console.error("renderAINarrative - Full raw object:", raw);
+    
+    // Provide more helpful error messages
+    if (errorMsg.includes("GOOGLE_API_KEY")) {
+      errorMsg = "AI model not configured. Please set GOOGLE_API_KEY environment variable.";
+    } else if (errorMsg.includes("google-generativeai")) {
+      errorMsg = "AI model package not available. Please install google-generativeai.";
+    } else if (errorMsg.includes("initialization failed")) {
+      errorMsg = "AI model failed to initialize. Please check your configuration.";
+    }
+    
+    box.innerHTML = `<p class='text-small text-dim' style='color: #ef4444;'>⚠️ AI analysis encountered an error: ${errorMsg}</p>
+                     <p class='text-small text-dim' style='margin-top: 8px;'>The dataset analysis was completed successfully, but AI insights are not available.</p>`;
     return;
   }
 
   const ai = cleanAIBlock(raw);
+  console.log("renderAINarrative - cleaned AI data:", ai);
 
   const list = (title, arr) =>
     (arr && arr.length)
@@ -1096,6 +1144,7 @@ function renderAINarrative(){
 
   // If still no structured content, try to display raw content
   if(!html.trim()){
+    console.warn("renderAINarrative - No structured content found, trying raw display");
     if(typeof raw === "string"){
       html = `<div style="font-size:.6rem;line-height:1.4;white-space:pre-wrap;">${raw}</div>`;
     } else {
@@ -1114,6 +1163,7 @@ function renderAINarrative(){
     }
   }
 
+  console.log("renderAINarrative - Final HTML length:", html.length);
   box.innerHTML = html || "<em>AI narrative present but could not be parsed.</em>";
 }
 

@@ -181,10 +181,16 @@ CORS(app, origins=ALLOWED_ORIGINS, supports_credentials=True)
 GEMINI_MODEL = None
 if GOOGLE_API_KEY and genai:
     try:
+        print(f"[Gemini] Initializing with API key: {GOOGLE_API_KEY[:10]}...")
         genai.configure(api_key=GOOGLE_API_KEY)
         GEMINI_MODEL = genai.GenerativeModel(MODEL_NAME)
+        print(f"[Gemini] Successfully initialized model: {MODEL_NAME}")
     except Exception as e:
         print(f"[Gemini] init failed: {e}")
+        print(f"[Gemini] API key present: {bool(GOOGLE_API_KEY)}")
+        print(f"[Gemini] genai available: {bool(genai)}")
+else:
+    print(f"[Gemini] Not initializing - API key present: {bool(GOOGLE_API_KEY)}, genai available: {bool(genai)}")
 
 # ---------- Helpers ----------
 def ok(**payload):            return jsonify({"status": "ok", **payload})
@@ -997,7 +1003,18 @@ def build_auto_bundle(filename):
 def ai_narrative_from_bundle(bundle):
     if not GEMINI_MODEL:
         print("[AI] Gemini model not available")
-        return {"error": "AI model not configured"}
+        if not GOOGLE_API_KEY:
+            error_msg = "AI model not configured - missing GOOGLE_API_KEY environment variable"
+            print(f"[AI] {error_msg}")
+            return {"error": error_msg}
+        elif not genai:
+            error_msg = "AI model not configured - google-generativeai package not available"
+            print(f"[AI] {error_msg}")
+            return {"error": error_msg}
+        else:
+            error_msg = "AI model not configured - initialization failed"
+            print(f"[AI] {error_msg}")
+            return {"error": error_msg}
     
     try:
         brief = {
@@ -1054,6 +1071,8 @@ Respond with ONLY the JSON object, no other text.
 """
         
         print(f"[AI] Generating narrative for dataset with {brief.get('basic', {}).get('rows', '?')} rows")
+        print(f"[AI] Brief data: {brief}")
+        
         r = GEMINI_MODEL.generate_content(prompt)
         raw = (getattr(r, "text", None) or "").strip()
         
@@ -1074,7 +1093,7 @@ Respond with ONLY the JSON object, no other text.
             print(f"[AI] JSON parsing failed: {je}")
             print(f"[AI] Failed content: {raw}")
             # Return a structured fallback
-            return {
+            fallback = {
                 "overview": f"Dataset analysis completed for {brief.get('basic', {}).get('rows', '?')} rows and {brief.get('basic', {}).get('columns', '?')} columns.",
                 "key_findings": [
                     f"Dataset contains {brief.get('basic', {}).get('numeric_cols', 0)} numeric and {brief.get('basic', {}).get('categorical_cols', 0)} categorical variables",
@@ -1099,10 +1118,15 @@ Respond with ONLY the JSON object, no other text.
                 ],
                 "chart_priorities": ["correlation_heatmap", "scatter_plots", "distribution_charts"]
             }
+            print(f"[AI] Using fallback response")
+            return fallback
             
     except Exception as e:
+        error_msg = str(e)
         print(f"[AI] Generation failed: {e}")
-        return {"error": str(e), "overview": "AI analysis encountered an error"}
+        print(f"[AI] Exception type: {type(e).__name__}")
+        print(f"[AI] Bundle keys: {list(bundle.keys()) if isinstance(bundle, dict) else 'Not a dict'}")
+        return {"error": error_msg, "overview": f"AI analysis encountered an error: {error_msg}"}
 
 @app.post("/api/auto_explore")
 def auto_explore():
@@ -1118,11 +1142,16 @@ def auto_explore():
         # 1) get or build
         bundle = _get_cached_bundle(fn)
         if bundle is None:
+            print(f"[Auto Explore] Building bundle for {fn}")
             bundle = build_auto_bundle(fn)
             _cache_bundle(fn, bundle)
+        else:
+            print(f"[Auto Explore] Using cached bundle for {fn}")
 
         # 2) generate AI (can use full bundle)
+        print(f"[Auto Explore] Generating AI narrative...")
         ai = ai_narrative_from_bundle(bundle)
+        print(f"[Auto Explore] AI result type: {type(ai)}, keys: {list(ai.keys()) if isinstance(ai, dict) else 'N/A'}")
 
         # 3) return slimmed version to client
         return ok(bundle=slim_bundle(bundle), ai=ai)
