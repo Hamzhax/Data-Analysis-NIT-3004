@@ -689,7 +689,12 @@ def coltypes():
         return fail(str(e), 500)
 
 # ---------- ANALYZE ----------
-VALID_METHODS = {"summary", "correlation", "value_counts", "pca", "kmeans", "assoc_rules"}
+VALID_METHODS = {
+    "summary", "correlation", "value_counts", "pca", "kmeans", "assoc_rules",
+    "linear_regression", "logistic_regression", "random_forest", "time_series_decomp",
+    "outlier_detection", "feature_importance", "trend_analysis", "clustering_analysis",
+    "anomaly_detection", "dimensionality_reduction", "regression_comparison", "classification_comparison"
+}
 
 @app.post("/api/analyze")
 def analyze():
@@ -784,6 +789,547 @@ def analyze():
             } for _, r in top.iterrows()]
             return ok(method=method, rules=recs)
 
+        # Predictive Analysis Methods
+        if method == "linear_regression":
+            num = df.select_dtypes(include="number").dropna()
+            if num.shape[1] < 2: return fail("Need >=2 numeric columns.")
+            target_col = body.get("target") or num.columns[-1]  # Use last column as default target
+            if target_col not in num.columns: return fail("Target column not found.")
+            
+            from sklearn.linear_model import LinearRegression
+            from sklearn.model_selection import train_test_split
+            from sklearn.metrics import r2_score, mean_squared_error
+            
+            X = num.drop(columns=[target_col])
+            y = num[target_col]
+            
+            if len(X.columns) == 0: return fail("No features available after removing target.")
+            
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+            model = LinearRegression()
+            model.fit(X_train, y_train)
+            
+            y_pred = model.predict(X_test)
+            r2 = r2_score(y_test, y_pred)
+            mse = mean_squared_error(y_test, y_pred)
+            
+            feature_importance = [{"feature": col, "coefficient": float(coef)} 
+                                for col, coef in zip(X.columns, model.coef_)]
+            
+            return ok(method=method, target=target_col, r2_score=float(r2), 
+                     mse=float(mse), feature_importance=feature_importance,
+                     predictions=[[float(actual), float(pred)] for actual, pred in zip(y_test[:50], y_pred[:50])])
+
+        if method == "outlier_detection":
+            num = df.select_dtypes(include="number").dropna()
+            if num.shape[1] < 2: return fail("Need >=2 numeric columns.")
+            
+            from sklearn.ensemble import IsolationForest
+            
+            iso_forest = IsolationForest(contamination=0.1, random_state=42)
+            outliers = iso_forest.fit_predict(num)
+            
+            outlier_indices = np.where(outliers == -1)[0]
+            outlier_scores = iso_forest.score_samples(num)
+            
+            # Get the most extreme outliers
+            extreme_indices = np.argsort(outlier_scores)[:20]
+            
+            outlier_data = []
+            for idx in extreme_indices:
+                outlier_data.append({
+                    "index": int(idx),
+                    "score": float(outlier_scores[idx]),
+                    "values": {col: float(num.iloc[idx][col]) for col in num.columns[:5]}  # Limit columns
+                })
+            
+            return ok(method=method, 
+                     outlier_count=int(len(outlier_indices)),
+                     total_points=int(len(num)),
+                     outlier_percentage=float(len(outlier_indices) / len(num) * 100),
+                     extreme_outliers=outlier_data)
+
+        if method == "feature_importance":
+            num = df.select_dtypes(include="number").dropna()
+            if num.shape[1] < 3: return fail("Need >=3 numeric columns.")
+            target_col = body.get("target") or num.columns[-1]
+            if target_col not in num.columns: return fail("Target column not found.")
+            
+            from sklearn.ensemble import RandomForestRegressor
+            from sklearn.model_selection import train_test_split
+            
+            X = num.drop(columns=[target_col])
+            y = num[target_col]
+            
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+            rf = RandomForestRegressor(n_estimators=100, random_state=42)
+            rf.fit(X_train, y_train)
+            
+            importance_data = [{"feature": col, "importance": float(imp)} 
+                             for col, imp in zip(X.columns, rf.feature_importances_)]
+            importance_data.sort(key=lambda x: x["importance"], reverse=True)
+            
+            return ok(method=method, target=target_col, 
+                     feature_importance=importance_data,
+                     score=float(rf.score(X_test, y_test)))
+
+        if method == "trend_analysis":
+            # Simple trend analysis for time series or sequential data
+            num = df.select_dtypes(include="number")
+            if num.empty: return fail("No numeric columns.")
+            
+            trends = {}
+            for col in num.columns[:10]:  # Limit to first 10 columns
+                values = num[col].dropna()
+                if len(values) < 10: continue
+                
+                # Calculate trend using linear regression on index
+                x = np.arange(len(values)).reshape(-1, 1)
+                y = values.values
+                
+                from sklearn.linear_model import LinearRegression
+                lr = LinearRegression()
+                lr.fit(x, y)
+                
+                slope = float(lr.coef_[0])
+                r2 = float(lr.score(x, y))
+                
+                trend_direction = "increasing" if slope > 0.01 else "decreasing" if slope < -0.01 else "stable"
+                
+                trends[col] = {
+                    "slope": slope,
+                    "r2": r2,
+                    "direction": trend_direction,
+                    "strength": "strong" if r2 > 0.7 else "moderate" if r2 > 0.3 else "weak"
+                }
+            
+            return ok(method=method, trends=trends)
+
+        if method == "random_forest":
+            num = df.select_dtypes(include="number").dropna()
+            if num.shape[1] < 2: return fail("Need >=2 numeric columns.")
+            target_col = body.get("target") or num.columns[-1]
+            if target_col not in num.columns: return fail("Target column not found.")
+            
+            from sklearn.ensemble import RandomForestRegressor
+            from sklearn.model_selection import train_test_split
+            from sklearn.metrics import r2_score, mean_squared_error
+            
+            X = num.drop(columns=[target_col])
+            y = num[target_col]
+            
+            if len(X.columns) == 0: return fail("No features available after removing target.")
+            
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+            model = RandomForestRegressor(n_estimators=100, random_state=42)
+            model.fit(X_train, y_train)
+            
+            y_pred = model.predict(X_test)
+            r2 = r2_score(y_test, y_pred)
+            mse = mean_squared_error(y_test, y_pred)
+            
+            feature_importance = [{"feature": col, "importance": float(imp)} 
+                                for col, imp in zip(X.columns, model.feature_importances_)]
+            feature_importance.sort(key=lambda x: x["importance"], reverse=True)
+            
+            return ok(method=method, target=target_col, r2_score=float(r2), 
+                     mse=float(mse), feature_importance=feature_importance[:10],
+                     predictions=[[float(actual), float(pred)] for actual, pred in zip(y_test[:50], y_pred[:50])])
+
+        if method == "logistic_regression":
+            # Check if we have a binary target column
+            target_col = body.get("target")
+            if not target_col: return fail("Target column required for logistic regression.")
+            if target_col not in df.columns: return fail("Target column not found.")
+            
+            # Check if target is binary/categorical
+            unique_vals = df[target_col].nunique()
+            if unique_vals > 10: return fail("Target has too many unique values for logistic regression.")
+            
+            from sklearn.linear_model import LogisticRegression
+            from sklearn.model_selection import train_test_split
+            from sklearn.metrics import accuracy_score, classification_report
+            from sklearn.preprocessing import LabelEncoder
+            
+            # Prepare features (numeric only for simplicity)
+            num = df.select_dtypes(include="number").dropna()
+            if target_col in num.columns:
+                X = num.drop(columns=[target_col])
+            else:
+                X = num
+            
+            if len(X.columns) == 0: return fail("No numeric features available.")
+            
+            # Prepare target
+            y = df[target_col].dropna()
+            # Align X and y indices
+            common_idx = X.index.intersection(y.index)
+            X = X.loc[common_idx]
+            y = y.loc[common_idx]
+            
+            # Encode target if it's categorical
+            le = LabelEncoder()
+            y_encoded = le.fit_transform(y)
+            
+            X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.3, random_state=42)
+            model = LogisticRegression(random_state=42, max_iter=1000)
+            model.fit(X_train, y_train)
+            
+            y_pred = model.predict(X_test)
+            accuracy = accuracy_score(y_test, y_pred)
+            
+            feature_importance = [{"feature": col, "coefficient": float(coef)} 
+                                for col, coef in zip(X.columns, model.coef_[0])]
+            
+            return ok(method=method, target=target_col, accuracy=float(accuracy),
+                     feature_importance=feature_importance,
+                     class_labels=le.classes_.tolist(),
+                     predictions=[[int(actual), int(pred)] for actual, pred in zip(y_test[:50], y_pred[:50])])
+
+        if method == "feature_importance":
+            num = df.select_dtypes(include="number").dropna()
+            if num.shape[1] < 2: return fail("Need >=2 numeric columns.")
+            
+            from sklearn.ensemble import RandomForestRegressor
+            from sklearn.feature_selection import mutual_info_regression
+            
+            target_col = body.get("target") or num.columns[-1]
+            if target_col not in num.columns: return fail("Target column not found.")
+            
+            X = num.drop(columns=[target_col])
+            y = num[target_col]
+            
+            if len(X.columns) == 0: return fail("No features available.")
+            
+            # Random Forest feature importance
+            rf = RandomForestRegressor(n_estimators=100, random_state=42)
+            rf.fit(X, y)
+            rf_importance = list(zip(X.columns, rf.feature_importances_))
+            
+            # Mutual information
+            mi_scores = mutual_info_regression(X, y, random_state=42)
+            mi_importance = list(zip(X.columns, mi_scores))
+            
+            # Correlation with target
+            corr_importance = [(col, abs(X[col].corr(y))) for col in X.columns]
+            
+            return ok(method=method, target=target_col,
+                     random_forest_importance=sorted(rf_importance, key=lambda x: x[1], reverse=True),
+                     mutual_info_importance=sorted(mi_importance, key=lambda x: x[1], reverse=True),
+                     correlation_importance=sorted(corr_importance, key=lambda x: x[1], reverse=True))
+
+        if method == "time_series_decomp":
+            # Check if we have a datetime column and a numeric target
+            date_cols = df.select_dtypes(include=['datetime64', 'datetime']).columns
+            if len(date_cols) == 0:
+                # Try to convert string columns to datetime
+                for col in df.select_dtypes(include=['object']).columns:
+                    try:
+                        df[col] = pd.to_datetime(df[col])
+                        date_cols = [col]
+                        break
+                    except:
+                        continue
+            
+            if len(date_cols) == 0: return fail("No datetime column found for time series analysis.")
+            
+            target_col = body.get("target")
+            if not target_col: return fail("Target column required for time series decomposition.")
+            if target_col not in df.select_dtypes(include="number").columns:
+                return fail("Target must be numeric for time series analysis.")
+            
+            from statsmodels.tsa.seasonal import seasonal_decompose
+            
+            date_col = date_cols[0]
+            ts_data = df[[date_col, target_col]].dropna().sort_values(date_col)
+            
+            if len(ts_data) < 24: return fail("Need at least 24 data points for time series decomposition.")
+            
+            # Set date as index
+            ts_data.set_index(date_col, inplace=True)
+            
+            # Perform decomposition
+            decomposition = seasonal_decompose(ts_data[target_col], model='additive', period=min(12, len(ts_data)//2))
+            
+            return ok(method=method, 
+                     target=target_col,
+                     date_column=date_col,
+                     trend=[float(x) if not pd.isna(x) else None for x in decomposition.trend],
+                     seasonal=[float(x) if not pd.isna(x) else None for x in decomposition.seasonal],
+                     residual=[float(x) if not pd.isna(x) else None for x in decomposition.resid],
+                     dates=[str(d) for d in ts_data.index])
+
+        if method == "clustering_analysis":
+            num = df.select_dtypes(include="number").dropna()
+            if num.shape[1] < 2: return fail("Need >=2 numeric columns.")
+            if num.shape[0] < 6: return fail("Need at least 6 data points.")
+            
+            from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
+            from sklearn.preprocessing import StandardScaler
+            from sklearn.metrics import silhouette_score
+            
+            # Standardize the data
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(num)
+            
+            results = {}
+            
+            # K-means with different k values
+            kmeans_results = []
+            for k in range(2, min(8, len(num)//2)):
+                kmeans = KMeans(n_clusters=k, random_state=42, n_init="auto")
+                labels = kmeans.fit_predict(X_scaled)
+                silhouette = silhouette_score(X_scaled, labels)
+                kmeans_results.append({"k": k, "silhouette": float(silhouette), "inertia": float(kmeans.inertia_)})
+            results["kmeans"] = kmeans_results
+            
+            # DBSCAN
+            try:
+                dbscan = DBSCAN(eps=0.5, min_samples=3)
+                dbscan_labels = dbscan.fit_predict(X_scaled)
+                n_clusters = len(set(dbscan_labels)) - (1 if -1 in dbscan_labels else 0)
+                if n_clusters > 1:
+                    dbscan_silhouette = silhouette_score(X_scaled, dbscan_labels)
+                    results["dbscan"] = {"clusters": n_clusters, "silhouette": float(dbscan_silhouette)}
+            except:
+                results["dbscan"] = {"error": "DBSCAN failed"}
+            
+            # Hierarchical clustering
+            try:
+                hierarchical = AgglomerativeClustering(n_clusters=3)
+                hier_labels = hierarchical.fit_predict(X_scaled)
+                hier_silhouette = silhouette_score(X_scaled, hier_labels)
+                results["hierarchical"] = {"clusters": 3, "silhouette": float(hier_silhouette)}
+            except:
+                results["hierarchical"] = {"error": "Hierarchical clustering failed"}
+            
+            return ok(method=method, results=results, columns=num.columns.tolist())
+
+        if method == "anomaly_detection":
+            num = df.select_dtypes(include="number").dropna()
+            if num.shape[1] < 1: return fail("Need at least 1 numeric column.")
+            
+            from sklearn.ensemble import IsolationForest
+            from sklearn.svm import OneClassSVM
+            from sklearn.covariance import EllipticEnvelope
+            
+            results = {}
+            
+            # Isolation Forest
+            iso_forest = IsolationForest(contamination=0.1, random_state=42)
+            iso_outliers = iso_forest.fit_predict(num)
+            iso_scores = iso_forest.score_samples(num)
+            results["isolation_forest"] = {
+                "outliers": int(sum(iso_outliers == -1)),
+                "outlier_percentage": float(sum(iso_outliers == -1) / len(num) * 100),
+                "anomaly_scores": [float(score) for score in iso_scores[:100]]  # Limit to 100 for performance
+            }
+            
+            # One-Class SVM
+            try:
+                svm = OneClassSVM(gamma='auto')
+                svm_outliers = svm.fit_predict(num)
+                results["one_class_svm"] = {
+                    "outliers": int(sum(svm_outliers == -1)),
+                    "outlier_percentage": float(sum(svm_outliers == -1) / len(num) * 100)
+                }
+            except:
+                results["one_class_svm"] = {"error": "SVM anomaly detection failed"}
+            
+            # Elliptic Envelope
+            try:
+                envelope = EllipticEnvelope(contamination=0.1, random_state=42)
+                env_outliers = envelope.fit_predict(num)
+                results["elliptic_envelope"] = {
+                    "outliers": int(sum(env_outliers == -1)),
+                    "outlier_percentage": float(sum(env_outliers == -1) / len(num) * 100)
+                }
+            except:
+                results["elliptic_envelope"] = {"error": "Elliptic Envelope detection failed"}
+            
+            return ok(method=method, results=results, total_points=len(num))
+
+        if method == "dimensionality_reduction":
+            num = df.select_dtypes(include="number").dropna()
+            if num.shape[1] < 3: return fail("Need >=3 numeric columns for dimensionality reduction.")
+            
+            from sklearn.decomposition import PCA, FastICA
+            from sklearn.manifold import TSNE
+            from sklearn.preprocessing import StandardScaler
+            
+            # Standardize the data
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(num)
+            
+            results = {}
+            
+            # PCA
+            pca = PCA(n_components=min(3, num.shape[1]), random_state=42)
+            pca_result = pca.fit_transform(X_scaled)
+            results["pca"] = {
+                "explained_variance": pca.explained_variance_ratio_.tolist(),
+                "components_2d": pca_result[:, :2].tolist(),
+                "cumulative_variance": float(sum(pca.explained_variance_ratio_))
+            }
+            
+            # t-SNE (only if reasonable number of samples)
+            if len(num) <= 1000:
+                try:
+                    tsne = TSNE(n_components=2, random_state=42, perplexity=min(30, len(num)-1))
+                    tsne_result = tsne.fit_transform(X_scaled)
+                    results["tsne"] = {
+                        "components_2d": tsne_result.tolist()
+                    }
+                except:
+                    results["tsne"] = {"error": "t-SNE failed"}
+            else:
+                results["tsne"] = {"error": "Too many samples for t-SNE"}
+            
+            # ICA
+            try:
+                ica = FastICA(n_components=min(3, num.shape[1]), random_state=42)
+                ica_result = ica.fit_transform(X_scaled)
+                results["ica"] = {
+                    "components_2d": ica_result[:, :2].tolist()
+                }
+            except:
+                results["ica"] = {"error": "ICA failed"}
+            
+            return ok(method=method, results=results, original_features=num.columns.tolist())
+
+        if method == "regression_comparison":
+            num = df.select_dtypes(include="number").dropna()
+            if num.shape[1] < 2: return fail("Need >=2 numeric columns.")
+            target_col = body.get("target") or num.columns[-1]
+            if target_col not in num.columns: return fail("Target column not found.")
+            
+            from sklearn.linear_model import LinearRegression, Ridge, Lasso
+            from sklearn.ensemble import RandomForestRegressor
+            from sklearn.model_selection import train_test_split, cross_val_score
+            from sklearn.metrics import r2_score, mean_squared_error
+            
+            X = num.drop(columns=[target_col])
+            y = num[target_col]
+            
+            if len(X.columns) == 0: return fail("No features available.")
+            
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+            
+            models = {
+                "Linear Regression": LinearRegression(),
+                "Ridge Regression": Ridge(alpha=1.0, random_state=42),
+                "Lasso Regression": Lasso(alpha=1.0, random_state=42),
+                "Random Forest": RandomForestRegressor(n_estimators=100, random_state=42)
+            }
+            
+            results = []
+            for name, model in models.items():
+                try:
+                    # Fit and predict
+                    model.fit(X_train, y_train)
+                    y_pred = model.predict(X_test)
+                    
+                    # Calculate metrics
+                    r2 = r2_score(y_test, y_pred)
+                    mse = mean_squared_error(y_test, y_pred)
+                    
+                    # Cross-validation
+                    cv_scores = cross_val_score(model, X, y, cv=5, scoring='r2')
+                    
+                    results.append({
+                        "model": name,
+                        "r2_score": float(r2),
+                        "mse": float(mse),
+                        "cv_mean": float(cv_scores.mean()),
+                        "cv_std": float(cv_scores.std())
+                    })
+                except Exception as e:
+                    results.append({
+                        "model": name,
+                        "error": str(e)
+                    })
+            
+            return ok(method=method, target=target_col, model_comparison=results)
+
+        if method == "classification_comparison":
+            target_col = body.get("target")
+            if not target_col: return fail("Target column required for classification comparison.")
+            if target_col not in df.columns: return fail("Target column not found.")
+            
+            # Check if target is suitable for classification
+            unique_vals = df[target_col].nunique()
+            if unique_vals > 20: return fail("Target has too many unique values for classification.")
+            
+            from sklearn.linear_model import LogisticRegression
+            from sklearn.ensemble import RandomForestClassifier
+            from sklearn.svm import SVC
+            from sklearn.naive_bayes import GaussianNB
+            from sklearn.model_selection import train_test_split, cross_val_score
+            from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+            from sklearn.preprocessing import LabelEncoder
+            
+            # Prepare features (numeric only)
+            num = df.select_dtypes(include="number").dropna()
+            if target_col in num.columns:
+                X = num.drop(columns=[target_col])
+            else:
+                X = num
+            
+            if len(X.columns) == 0: return fail("No numeric features available.")
+            
+            # Prepare target
+            y = df[target_col].dropna()
+            common_idx = X.index.intersection(y.index)
+            X = X.loc[common_idx]
+            y = y.loc[common_idx]
+            
+            # Encode target
+            le = LabelEncoder()
+            y_encoded = le.fit_transform(y)
+            
+            X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.3, random_state=42)
+            
+            models = {
+                "Logistic Regression": LogisticRegression(random_state=42, max_iter=1000),
+                "Random Forest": RandomForestClassifier(n_estimators=100, random_state=42),
+                "Naive Bayes": GaussianNB(),
+                "SVM": SVC(random_state=42, gamma='auto')
+            }
+            
+            results = []
+            for name, model in models.items():
+                try:
+                    # Fit and predict
+                    model.fit(X_train, y_train)
+                    y_pred = model.predict(X_test)
+                    
+                    # Calculate metrics
+                    accuracy = accuracy_score(y_test, y_pred)
+                    precision = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+                    recall = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+                    f1 = f1_score(y_test, y_pred, average='weighted', zero_division=0)
+                    
+                    # Cross-validation
+                    cv_scores = cross_val_score(model, X, y_encoded, cv=5, scoring='accuracy')
+                    
+                    results.append({
+                        "model": name,
+                        "accuracy": float(accuracy),
+                        "precision": float(precision),
+                        "recall": float(recall),
+                        "f1_score": float(f1),
+                        "cv_mean": float(cv_scores.mean()),
+                        "cv_std": float(cv_scores.std())
+                    })
+                except Exception as e:
+                    results.append({
+                        "model": name,
+                        "error": str(e)
+                    })
+            
+            return ok(method=method, target=target_col, 
+                     model_comparison=results, class_labels=le.classes_.tolist())
+
     except Exception as e:
         return fail(f"Analysis failed: {e}", 500)
 
@@ -819,6 +1365,89 @@ If information insufficient, still produce generic safe suggestions.
         return ok(**parsed)
     except Exception as e:
         return fail(f"AI summary failed: {e}", 500)
+
+@app.post("/api/ai_chart_description")
+def ai_chart_description():
+    ok_login, resp = require_login()
+    if not ok_login: return resp
+    if not GEMINI_MODEL:
+        return fail("AI not configured.", 500)
+    
+    d = request.get_json(force=True) or {}
+    chart_type = (d.get("chart_type") or "").strip()
+    data_context = d.get("data_context", {})
+    
+    if not chart_type:
+        return fail("chart_type required.")
+    
+    # Create context-aware descriptions
+    chart_descriptions = {
+        "correlation_heatmap": {
+            "purpose": "Shows the strength and direction of linear relationships between numeric variables",
+            "interpretation": "Values range from -1 to 1. Values close to 1 or -1 indicate strong relationships, while values near 0 indicate weak relationships. Red colors typically show positive correlations, blue shows negative correlations.",
+            "insights": "Use this to identify which variables move together, find redundant features, or discover unexpected relationships in your data."
+        },
+        "pca_scatter": {
+            "purpose": "Visualizes high-dimensional data in 2D space while preserving as much variance as possible",
+            "interpretation": "Each point represents a data record projected onto the first two principal components. Clustering patterns may reveal natural groupings in your data.",
+            "insights": "Helpful for dimensionality reduction, outlier detection, and understanding the main patterns of variation in your dataset."
+        },
+        "kmeans_scatter": {
+            "purpose": "Shows how K-means clustering has grouped your data points",
+            "interpretation": "Different colors represent different clusters. Points close together are more similar. Cluster centers are typically marked distinctly.",
+            "insights": "Use this to understand natural groupings in your data, customer segments, or to identify distinct patterns."
+        },
+        "histogram": {
+            "purpose": "Shows the distribution of values for a single numeric variable",
+            "interpretation": "The height of each bar represents frequency or count. The shape reveals if data is normal, skewed, has multiple peaks, or contains outliers.",
+            "insights": "Essential for understanding data distribution, identifying outliers, and determining appropriate statistical methods."
+        },
+        "bar_chart": {
+            "purpose": "Compares frequencies or values across different categories",
+            "interpretation": "Bar height represents the count or measure for each category. Helps identify the most/least frequent categories.",
+            "insights": "Perfect for categorical data analysis, identifying dominant categories, and comparing group sizes."
+        },
+        "scatter_plot": {
+            "purpose": "Reveals relationships between two continuous variables",
+            "interpretation": "Each point represents one observation. Patterns like lines suggest correlations, clusters suggest groups, and scattered points suggest no relationship.",
+            "insights": "Use to identify correlations, trends, outliers, and to visualize the strength of relationships between variables."
+        },
+        "line_chart": {
+            "purpose": "Shows trends and changes over time or ordered sequences",
+            "interpretation": "The line connects data points in order, revealing trends, cycles, and patterns over time. Slopes indicate rate of change.",
+            "insights": "Essential for time series analysis, trend identification, and understanding how variables change over time."
+        },
+        "box_plot": {
+            "purpose": "Displays the distribution summary including median, quartiles, and outliers",
+            "interpretation": "The box shows the middle 50% of data, whiskers show the range, and dots represent outliers. Useful for comparing distributions.",
+            "insights": "Great for identifying outliers, comparing groups, and understanding data spread and central tendency."
+        }
+    }
+    
+    default_description = {
+        "purpose": "Provides visual representation of your data patterns",
+        "interpretation": "Examine the chart for trends, patterns, outliers, and relationships that may not be obvious in raw data",
+        "insights": "Visual analysis often reveals insights that statistical summaries might miss"
+    }
+    
+    description = chart_descriptions.get(chart_type, default_description)
+    
+    # Add data-specific context if available
+    if data_context:
+        context_prompt = f"""
+Based on this chart type ({chart_type}) and data context: {data_context}, 
+provide a specific interpretation focusing on what patterns or insights someone should look for.
+Keep response concise (2-3 sentences) and actionable.
+"""
+        try:
+            resp_ai = GEMINI_MODEL.generate_content(context_prompt)
+            ai_context = (getattr(resp_ai, "text", None) or "").strip()
+            if ai_context:
+                description["ai_insights"] = ai_context
+        except:
+            pass  # If AI fails, just use the static description
+    
+    return ok(chart_type=chart_type, description=description)
 
 # ---------- AUTO EXPLORE ----------
 def build_auto_bundle(filename):
@@ -881,8 +1510,13 @@ def build_auto_bundle(filename):
                 "explained_variance": pca.explained_variance_ratio_.tolist(),
                 "components_2d": [[float(a), float(b)] for a, b in comps[:300, :2]]
             }
-        except Exception:
+            print(f"[PCA] Generated PCA with {len(pca_result['components_2d'])} components")
+            print(f"[PCA] Explained variance: {pca_result['explained_variance']}")
+        except Exception as e:
+            print(f"[PCA] Failed to generate PCA: {e}")
             pca_result = None
+    else:
+        print(f"[PCA] Insufficient data for PCA: {num_df.shape[1]} cols, {num_df.dropna().shape[0]} rows")
 
     # KMeans
     kmeans_result = None
@@ -935,8 +1569,11 @@ def build_auto_bundle(filename):
                     # Also trim labels_preview to match
                     kmeans_result["labels_preview"] = best_model.labels_[:max_len].tolist()
                     
-        except Exception:
+        except Exception as e:
+            print(f"[KMeans] Failed to generate K-means: {e}")
             kmeans_result = None
+    else:
+        print(f"[KMeans] Insufficient data for K-means: {num_df.shape[1]} cols, {num_df.dropna().shape[0]} rows")
 
     # Association Rules
     assoc_result = None
@@ -1000,7 +1637,68 @@ def build_auto_bundle(filename):
         "recommended_charts": rec_charts
     }
 
-def ai_narrative_from_bundle(bundle):
+def ai_chart_description(chart_type, data_context):
+    """Generate AI descriptions for different chart types"""
+    if not GEMINI_MODEL:
+        return {"description": f"This {chart_type} visualization shows patterns in your data."}
+    
+    descriptions = {
+        "correlation_heatmap": "correlation patterns and relationships between variables",
+        "pca_scatter": "dimensionality reduction showing data variance in 2D space",
+        "kmeans_scatter": "clustering results showing natural groupings in the data",
+        "value_counts": "frequency distribution of categorical values",
+        "histogram": "distribution shape and data spread patterns",
+        "scatter": "relationships and correlations between two variables",
+        "bar_chart": "comparative values across different categories"
+    }
+    
+    basic_desc = descriptions.get(chart_type, "data patterns and insights")
+    
+    try:
+        prompt = f"""
+You are a data visualization expert. Provide a concise 2-3 sentence description of what a {chart_type} chart reveals about data.
+
+Context: {data_context}
+Chart type: {chart_type}
+
+Focus on:
+- What patterns this chart type reveals
+- How to interpret the visualization
+- Key insights users should look for
+
+Return a JSON with key "description" containing the explanation.
+"""
+        
+        r = GEMINI_MODEL.generate_content(prompt)
+        raw = (getattr(r, "text", None) or "").strip()
+        
+        if raw.startswith("```json"):
+            raw = raw.replace("```json", "").replace("```", "").strip()
+        
+        try:
+            parsed = json.loads(raw)
+            return parsed
+        except:
+            return {"description": f"This {chart_type} visualization reveals {basic_desc}. Look for patterns, trends, and relationships that can guide your analysis decisions."}
+            
+    except Exception as e:
+        return {"description": f"This {chart_type} visualization reveals {basic_desc}. Examine the patterns to understand your data better."}
+
+# Add endpoint for chart descriptions
+@app.post("/api/chart_description")
+def chart_description():
+    ok_login, resp = require_login()
+    if not ok_login: return resp
+    
+    d = request.get_json(force=True) or {}
+    chart_type = d.get("chart_type", "")
+    data_context = d.get("context", "dataset analysis")
+    
+    if not chart_type:
+        return fail("chart_type required.")
+    
+    description = ai_chart_description(chart_type, data_context)
+    return ok(**description)
     if not GEMINI_MODEL:
         print("[AI] Gemini model not available")
         if not GOOGLE_API_KEY:

@@ -262,15 +262,79 @@ async function applyCleaning(){
   }
 }
 
-/* ---------------- Analyses ---------------- */
+/* ---------- AI Chart Descriptions ---------- */
+async function getChartDescription(chartType, dataContext = {}){
+  try {
+    const response = await handleApi("/api/ai_chart_description", {
+      method: "POST",
+      body: { chart_type: chartType, data_context: dataContext }
+    });
+    return response.description;
+  } catch(e) {
+    console.warn("Failed to get AI chart description:", e);
+    return null;
+  }
+}
+
+function addChartDescription(containerId, chartType, dataContext = {}) {
+  const container = $(containerId);
+  if (!container) return;
+  
+  // Remove existing description
+  const existingDesc = container.querySelector('.chart-description');
+  if (existingDesc) existingDesc.remove();
+  
+  // Add description container
+  const descDiv = document.createElement('div');
+  descDiv.className = 'chart-description';
+  descDiv.style.cssText = `
+    background: #f8f9fa; 
+    border-left: 4px solid #007bff; 
+    padding: 12px; 
+    margin: 10px 0; 
+    border-radius: 4px; 
+    font-size: 0.85rem; 
+    line-height: 1.4;
+  `;
+  descDiv.innerHTML = `<div style="color: #666;">Loading chart insights...</div>`;
+  
+  container.appendChild(descDiv);
+  
+  // Load AI description
+  getChartDescription(chartType, dataContext).then(description => {
+    if (description) {
+      let html = `<strong style="color: #007bff;">📊 Chart Insights:</strong><br>`;
+      html += `<strong>Purpose:</strong> ${description.purpose}<br>`;
+      html += `<strong>How to Read:</strong> ${description.interpretation}<br>`;
+      html += `<strong>What to Look For:</strong> ${description.insights}`;
+      
+      if (description.ai_insights) {
+        html += `<br><strong>Data-Specific Insights:</strong> ${description.ai_insights}`;
+      }
+      
+      descDiv.innerHTML = html;
+    } else {
+      descDiv.innerHTML = `<em>Chart description not available</em>`;
+    }
+  });
+}
+
+/* ---------- Analyses ---------- */
 async function runAnalysis(){
   const m=$("analysis-method")?.value;
   const column=$("column-name")?.value?.trim() || $("column-select")?.value?.trim();
+  const target=$("target-column")?.value?.trim();
   const k=parseInt($("cluster-k")?.value||"3",10);
   if(!m){ toast("Choose a method","warn"); return; }
   try{
     $("analysis-status")&&( $("analysis-status").textContent="Running...");
-    const payload={method:m}; if(m==="value_counts") payload.column=column; if(m==="kmeans") payload.k=k;
+    const payload={method:m}; 
+    if(m==="value_counts") payload.column=column; 
+    if(m==="kmeans") payload.k=k;
+    if(["linear_regression", "logistic_regression", "random_forest", "feature_importance", "time_series_decomp", "regression_comparison", "classification_comparison"].includes(m)) {
+      payload.target=target;
+    }
+    
     const data=await handleApi("/api/analyze",{method:"POST",body:payload});
     switch(m){
       case "summary":      lsSet("summary",data.summary); inferColumnTypes(); break;
@@ -291,6 +355,72 @@ async function runAnalysis(){
         components_2d:data.components_2d
       }); break;
       case "assoc_rules":  lsSet("assoc",data.rules); break;
+      case "linear_regression": lsSet("regression",{
+        type: "linear",
+        target: data.target,
+        r2_score: data.r2_score,
+        mse: data.mse,
+        feature_importance: data.feature_importance,
+        predictions: data.predictions
+      }); break;
+      case "logistic_regression": lsSet("regression",{
+        type: "logistic",
+        target: data.target,
+        accuracy: data.accuracy,
+        feature_importance: data.feature_importance,
+        class_labels: data.class_labels,
+        predictions: data.predictions
+      }); break;
+      case "random_forest": lsSet("regression",{
+        type: "random_forest",
+        target: data.target,
+        r2_score: data.r2_score,
+        mse: data.mse,
+        feature_importance: data.feature_importance,
+        predictions: data.predictions
+      }); break;
+      case "outlier_detection": lsSet("outliers",{
+        outlier_count: data.outlier_count,
+        total_points: data.total_points,
+        outlier_percentage: data.outlier_percentage,
+        extreme_outliers: data.extreme_outliers
+      }); break;
+      case "feature_importance": lsSet("featureImportance",{
+        target: data.target,
+        random_forest_importance: data.random_forest_importance,
+        mutual_info_importance: data.mutual_info_importance,
+        correlation_importance: data.correlation_importance
+      }); break;
+      case "trend_analysis": lsSet("trendAnalysis",data.trends); break;
+      case "time_series_decomp": lsSet("timeSeriesDecomp",{
+        target: data.target,
+        date_column: data.date_column,
+        trend: data.trend,
+        seasonal: data.seasonal,
+        residual: data.residual,
+        dates: data.dates
+      }); break;
+      case "clustering_analysis": lsSet("clusteringAnalysis",{
+        results: data.results,
+        columns: data.columns
+      }); break;
+      case "anomaly_detection": lsSet("anomalyDetection",{
+        results: data.results,
+        total_points: data.total_points
+      }); break;
+      case "dimensionality_reduction": lsSet("dimensionalityReduction",{
+        results: data.results,
+        original_features: data.original_features
+      }); break;
+      case "regression_comparison": lsSet("regressionComparison",{
+        target: data.target,
+        model_comparison: data.model_comparison
+      }); break;
+      case "classification_comparison": lsSet("classificationComparison",{
+        target: data.target,
+        model_comparison: data.model_comparison,
+        class_labels: data.class_labels
+      }); break;
     }
     $("analysis-status")&&( $("analysis-status").textContent="Done ✓");
     toast("Analysis stored – open Visualize","success");
@@ -729,7 +859,11 @@ function renderValueCounts(mode){
 
 /* ---------- Correlation MATRIX/TABLE ---------- */
 function getCorrelationMatrix(){ return lsGet("correlation") || lsGet("autoBundle")?.correlation_matrix || null; }
-function ensureCorrelation(){ renderCorrTable(); }
+function ensureCorrelation(){ 
+  renderCorrTable(); 
+  // Add AI description for correlation heatmap
+  setTimeout(() => addChartDescription("correlation-container", "correlation_heatmap"), 100);
+}
 function buildCorrMeta(corr){
   const cols=Object.keys(corr);
   let min=1,max=-1;
@@ -968,6 +1102,12 @@ function renderPCA(){
   }
   
   syncExportButtons();
+  
+  // Add AI description for PCA
+  setTimeout(() => {
+    const pcaData = { explained_variance: pca?.explained_variance || pca?.explained };
+    addChartDescription("pca-box", "pca_scatter", pcaData);
+  }, 100);
 }
 
 /* ---------- KMeans ---------- */
@@ -1038,6 +1178,12 @@ function renderKMeans(){
     }
   });
   syncExportButtons();
+  
+  // Add AI description for K-means clustering
+  setTimeout(() => {
+    const kmeansData = { k: km.k, clusters: Object.keys(clusters).length };
+    addChartDescription("kmeans-box", "kmeans_scatter", kmeansData);
+  }, 100);
 }
 
 /* ---------- Association Rules ---------- */
@@ -1080,7 +1226,184 @@ function renderSummary(){
   h+="</tbody></table>"; box.innerHTML=h;
 }
 
-/* ---------- AI Narrative render ---------- */
+/* ---------- AI Chart Descriptions ---------- */
+async function getChartDescription(chartType, context) {
+  try {
+    const result = await handleApi("/api/chart_description", {
+      method: "POST",
+      body: { chart_type: chartType, context: context }
+    });
+    return result.description || `This ${chartType} chart shows patterns in your data.`;
+  } catch (e) {
+    return `This ${chartType} chart reveals insights about your data. Examine the patterns to understand relationships and trends.`;
+  }
+}
+
+/* ---------- Enhanced Rendering Functions ---------- */
+async function renderChartWithDescription(chartType, renderFunction, context = "dataset analysis") {
+  // Render the chart first
+  renderFunction();
+  
+  // Get AI description
+  const description = await getChartDescription(chartType, context);
+  
+  // Find description container or create one
+  let descContainer = $(`${chartType}-description`);
+  if (!descContainer) {
+    // Try to find the chart container and add description after it
+    const chartContainer = $(`${chartType}-box`) || $(`${chartType}-container`);
+    if (chartContainer) {
+      const descDiv = document.createElement('div');
+      descDiv.id = `${chartType}-description`;
+      descDiv.className = 'chart-description';
+      descDiv.style.cssText = 'margin-top:10px;padding:8px;background:#f8f9fa;border-radius:4px;font-size:0.85rem;color:#666;';
+      chartContainer.parentNode.insertBefore(descDiv, chartContainer.nextSibling);
+      descContainer = descDiv;
+    }
+  }
+  
+  if (descContainer) {
+    descContainer.innerHTML = `<strong>💡 Insight:</strong> ${description}`;
+  }
+}
+
+/* ---------- New Analysis Renderers ---------- */
+function renderRegression() {
+  const regression = lsGet("regression");
+  const box = $("regression-box") || $("regression-container");
+  if (!box) return;
+  
+  if (!regression) {
+    box.innerHTML = "<p class='text-small text-dim'>No regression analysis data. Run Linear Regression analysis first.</p>";
+    return;
+  }
+  
+  let html = `
+    <h4>Linear Regression Results</h4>
+    <p><strong>Target:</strong> ${regression.target}</p>
+    <p><strong>R² Score:</strong> ${regression.r2_score.toFixed(4)} (${(regression.r2_score * 100).toFixed(1)}% variance explained)</p>
+    <p><strong>Mean Squared Error:</strong> ${regression.mse.toFixed(4)}</p>
+    
+    <h5>Feature Importance (Coefficients)</h5>
+    <table class='data-table'>
+      <thead><tr><th>Feature</th><th>Coefficient</th><th>Impact</th></tr></thead>
+      <tbody>
+  `;
+  
+  regression.feature_importance.forEach(item => {
+    const impact = Math.abs(item.coefficient) > 0.1 ? "High" : Math.abs(item.coefficient) > 0.01 ? "Medium" : "Low";
+    html += `<tr><td>${item.feature}</td><td>${item.coefficient.toFixed(4)}</td><td>${impact}</td></tr>`;
+  });
+  
+  html += `</tbody></table>`;
+  
+  if (regression.predictions && regression.predictions.length > 0) {
+    html += `<h5>Sample Predictions vs Actual (First 10)</h5>
+    <table class='data-table'>
+      <thead><tr><th>Actual</th><th>Predicted</th><th>Error</th></tr></thead>
+      <tbody>`;
+    
+    regression.predictions.slice(0, 10).forEach(([actual, pred]) => {
+      const error = Math.abs(actual - pred);
+      html += `<tr><td>${actual.toFixed(2)}</td><td>${pred.toFixed(2)}</td><td>${error.toFixed(2)}</td></tr>`;
+    });
+    
+    html += "</tbody></table>";
+  }
+  
+  box.innerHTML = html;
+}
+
+function renderOutliers() {
+  const outliers = lsGet("outliers");
+  const box = $("outliers-box") || $("outliers-container");
+  if (!box) return;
+  
+  if (!outliers) {
+    box.innerHTML = "<p class='text-small text-dim'>No outlier detection data. Run Outlier Detection analysis first.</p>";
+    return;
+  }
+  
+  let html = `
+    <h4>Outlier Detection Results</h4>
+    <p><strong>Total Data Points:</strong> ${outliers.total_points.toLocaleString()}</p>
+    <p><strong>Outliers Found:</strong> ${outliers.outlier_count} (${outliers.outlier_percentage.toFixed(1)}%)</p>
+    
+    <h5>Most Extreme Outliers</h5>
+    <table class='data-table'>
+      <thead><tr><th>Index</th><th>Anomaly Score</th><th>Sample Values</th></tr></thead>
+      <tbody>
+  `;
+  
+  outliers.extreme_outliers.slice(0, 10).forEach(outlier => {
+    const values = Object.entries(outlier.values).slice(0, 3).map(([k, v]) => `${k}: ${v.toFixed(2)}`).join(', ');
+    html += `<tr><td>${outlier.index}</td><td>${outlier.score.toFixed(4)}</td><td>${values}</td></tr>`;
+  });
+  
+  html += "</tbody></table>";
+  box.innerHTML = html;
+}
+
+function renderFeatureImportance() {
+  const features = lsGet("featureImportance");
+  const box = $("features-box") || $("features-container");
+  if (!box) return;
+  
+  if (!features) {
+    box.innerHTML = "<p class='text-small text-dim'>No feature importance data. Run Feature Importance analysis first.</p>";
+    return;
+  }
+  
+  let html = `
+    <h4>Feature Importance Analysis</h4>
+    <p><strong>Target Variable:</strong> ${features.target}</p>
+    <p><strong>Model Score (R²):</strong> ${features.score.toFixed(4)}</p>
+    
+    <h5>Feature Rankings</h5>
+    <table class='data-table'>
+      <thead><tr><th>Rank</th><th>Feature</th><th>Importance</th><th>Percentage</th></tr></thead>
+      <tbody>
+  `;
+  
+  features.feature_importance.forEach((item, index) => {
+    const percentage = (item.importance * 100).toFixed(1);
+    html += `<tr><td>${index + 1}</td><td>${item.feature}</td><td>${item.importance.toFixed(4)}</td><td>${percentage}%</td></tr>`;
+  });
+  
+  html += "</tbody></table>";
+  box.innerHTML = html;
+}
+
+function renderTrends() {
+  const trends = lsGet("trends");
+  const box = $("trends-box") || $("trends-container");
+  if (!box) return;
+  
+  if (!trends) {
+    box.innerHTML = "<p class='text-small text-dim'>No trend analysis data. Run Trend Analysis first.</p>";
+    return;
+  }
+  
+  let html = `
+    <h4>Trend Analysis Results</h4>
+    <table class='data-table'>
+      <thead><tr><th>Column</th><th>Direction</th><th>Strength</th><th>Slope</th><th>R²</th></tr></thead>
+      <tbody>
+  `;
+  
+  Object.entries(trends).forEach(([column, trend]) => {
+    html += `<tr>
+      <td>${column}</td>
+      <td><span class="badge ${trend.direction === 'increasing' ? 'badge-success' : trend.direction === 'decreasing' ? 'badge-warning' : 'badge-info'}">${trend.direction}</span></td>
+      <td>${trend.strength}</td>
+      <td>${trend.slope.toFixed(4)}</td>
+      <td>${trend.r2.toFixed(4)}</td>
+    </tr>`;
+  });
+  
+  html += "</tbody></table>";
+  box.innerHTML = html;
+}
 function renderAINarrative(){
   const box = $("ai-narrative-box") || $("ai-latest");
   if(!box) {

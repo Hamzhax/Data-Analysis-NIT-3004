@@ -122,10 +122,25 @@
           <option value="pca">PCA</option>
           <option value="kmeans">KMeans</option>
           <option value="assoc_rules">Association Rules</option>
+          <option value="linear_regression">Linear Regression (needs target)</option>
+          <option value="logistic_regression">Logistic Regression (needs target)</option>
+          <option value="random_forest">Random Forest (needs target)</option>
+          <option value="outlier_detection">Outlier Detection</option>
+          <option value="feature_importance">Feature Importance (needs target)</option>
+          <option value="trend_analysis">Trend Analysis</option>
+          <option value="time_series_decomp">Time Series Decomposition (needs target)</option>
+          <option value="clustering_analysis">Advanced Clustering Analysis</option>
+          <option value="anomaly_detection">Multi-Method Anomaly Detection</option>
+          <option value="dimensionality_reduction">Dimensionality Reduction Suite</option>
+          <option value="regression_comparison">Regression Model Comparison (needs target)</option>
+          <option value="classification_comparison">Classification Model Comparison (needs target)</option>
         </select>
 
         <label for="column-name" style="margin-top:.6rem;">Column (for Value Counts)</label>
         <input id="column-name" class="input" placeholder="column name">
+
+        <label for="target-column" style="margin-top:.6rem;">Target Column (for Regression/Feature Analysis)</label>
+        <input id="target-column" class="input" placeholder="target column name">
 
         <label for="cluster-k" style="margin-top:.6rem;">k (for KMeans)</label>
         <input id="cluster-k" type="number" value="3" min="2" max="12" class="input">
