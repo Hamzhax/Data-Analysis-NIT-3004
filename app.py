@@ -43,12 +43,33 @@ except Exception: requests = None
 import time, copy
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+
+# Additional sklearn imports for advanced analytics
+try:
+    from sklearn.ensemble import IsolationForest, RandomForestRegressor
+    from sklearn.cluster import DBSCAN
+    from sklearn.manifold import TSNE
+    from sklearn.decomposition import FastICA
+    SKLEARN_ADVANCED_AVAILABLE = True
+except Exception:
+    SKLEARN_ADVANCED_AVAILABLE = False
+    print("[Warning] Some sklearn components not available - advanced analytics may be limited")
 
 try:
     from mlxtend.frequent_patterns import apriori, association_rules
     MLXTEND_AVAILABLE = True
 except Exception:
     MLXTEND_AVAILABLE = False
+
+# Statsmodels for time series analysis
+try:
+    import statsmodels.api as sm
+    from statsmodels.tsa.seasonal import seasonal_decompose
+    STATSMODELS_AVAILABLE = True
+except Exception:
+    STATSMODELS_AVAILABLE = False
+    print("[Warning] statsmodels not available - time series analysis will be disabled")
 
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -706,7 +727,16 @@ def analyze():
         return fail("Invalid method.")
     filename = session.get("filename")
     if not filename: return fail("No active dataset.")
-    df = load_df(filename)
+    
+    # Load and optimize dataset size for memory constraints
+    df_full = load_df(filename)
+    MAX_ROWS = 10000
+    if df_full.shape[0] > MAX_ROWS:
+        df = df_full.sample(n=MAX_ROWS, random_state=42)
+        print(f"[Analysis] Using sample of {MAX_ROWS} rows from {df_full.shape[0]} total rows")
+    else:
+        df = df_full
+    
     column = body.get("column")
     k = int(body.get("k", 3))
 
@@ -1051,13 +1081,17 @@ def analyze():
             # Perform decomposition
             decomposition = seasonal_decompose(ts_data[target_col], model='additive', period=min(12, len(ts_data)//2))
             
+            # Limit data returned to avoid memory issues
+            max_points = 1000
+            step = max(1, len(ts_data) // max_points)
+            
             return ok(method=method, 
                      target=target_col,
                      date_column=date_col,
-                     trend=[float(x) if not pd.isna(x) else None for x in decomposition.trend],
-                     seasonal=[float(x) if not pd.isna(x) else None for x in decomposition.seasonal],
-                     residual=[float(x) if not pd.isna(x) else None for x in decomposition.resid],
-                     dates=[str(d) for d in ts_data.index])
+                     trend=[float(x) if not pd.isna(x) else None for x in decomposition.trend[::step]],
+                     seasonal=[float(x) if not pd.isna(x) else None for x in decomposition.seasonal[::step]],
+                     residual=[float(x) if not pd.isna(x) else None for x in decomposition.resid[::step]],
+                     dates=[str(d) for d in ts_data.index[::step]])
 
         if method == "clustering_analysis":
             num = df.select_dtypes(include="number").dropna()
@@ -1450,6 +1484,61 @@ Keep response concise (2-3 sentences) and actionable.
     return ok(chart_type=chart_type, description=description)
 
 # ---------- AUTO EXPLORE ----------
+def generate_chart_descriptions(bundle):
+    """Generate AI descriptions for all charts in the bundle"""
+    descriptions = {}
+    
+    if not GEMINI_MODEL:
+        # Return basic descriptions if AI not available
+        return {
+            "correlation_heatmap": {"description": "Shows correlation patterns between numeric variables"},
+            "pca_scatter": {"description": "Visualizes dimensionality reduction in 2D space"},
+            "cluster_scatter": {"description": "Shows clustering results and natural groupings"},
+            "histogram": {"description": "Displays distribution of numeric values"},
+            "bar_chart": {"description": "Compares frequencies across categories"},
+            "time_series": {"description": "Shows trends and patterns over time"},
+            "anomaly_detection": {"description": "Identifies outliers and unusual patterns"},
+            "clustering_analysis": {"description": "Advanced clustering with multiple algorithms"},
+            "dimensionality_reduction": {"description": "Multiple dimensionality reduction techniques"},
+            "feature_importance": {"description": "Ranks features by their predictive importance"}
+        }
+    
+    # Generate context-aware descriptions
+    basic_info = bundle.get("profile", {}).get("basic", {})
+    context = f"Dataset with {basic_info.get('rows', '?')} rows and {basic_info.get('columns', '?')} columns"
+    
+    chart_types = {
+        "correlation_heatmap": bundle.get("correlation_matrix"),
+        "pca_scatter": bundle.get("pca"),
+        "cluster_scatter": bundle.get("kmeans"),
+        "time_series": bundle.get("advanced_analytics", {}).get("time_series"),
+        "anomaly_detection": bundle.get("advanced_analytics", {}).get("anomaly_detection"),
+        "clustering_analysis": bundle.get("advanced_analytics", {}).get("clustering_analysis"),
+        "dimensionality_reduction": bundle.get("advanced_analytics", {}).get("dimensionality_reduction"),
+        "feature_importance": bundle.get("advanced_analytics", {}).get("feature_importance")
+    }
+    
+    for chart_type, data in chart_types.items():
+        if data:  # Only generate descriptions for available charts
+            try:
+                desc = ai_chart_description(chart_type, context)
+                descriptions[chart_type] = desc
+            except Exception as e:
+                print(f"[Chart Description] Failed for {chart_type}: {e}")
+                descriptions[chart_type] = {"description": f"Analysis results for {chart_type}"}
+    
+    return descriptions
+    for chart_type, data in chart_types.items():
+        if data:  # Only generate descriptions for available charts
+            try:
+                desc = ai_chart_description(chart_type, context)
+                descriptions[chart_type] = desc
+            except Exception as e:
+                print(f"[Chart Description] Failed for {chart_type}: {e}")
+                descriptions[chart_type] = {"description": f"Analysis results for {chart_type}"}
+    
+    return descriptions
+
 def build_auto_bundle(filename):
     # Load the full DataFrame for preview/meta, but sample for heavy analysis
     df_full = load_df(filename)
@@ -1601,12 +1690,177 @@ def build_auto_bundle(filename):
             except Exception:
                 assoc_result = None
 
+    # Advanced Predictive Analytics (New)
+    advanced_analytics = {}
+    
+    # Time Series Analysis (if data has datetime or index pattern)
+    time_series_result = None
+    if STATSMODELS_AVAILABLE:
+        try:
+            # Check for datetime columns or time-like patterns
+            datetime_cols = df.select_dtypes(include=['datetime64']).columns
+            if len(datetime_cols) > 0 and len(num_df.columns) > 0:
+                dt_col = datetime_cols[0]
+                target_col = num_df.columns[0]  # Use first numeric column
+                
+                # Create time series data
+                ts_data = df[[dt_col, target_col]].dropna().set_index(dt_col).sort_index()
+                
+                if len(ts_data) >= 24:  # Minimum for seasonal decomposition
+                    decomposition = seasonal_decompose(ts_data[target_col], model='additive', period=min(12, len(ts_data)//2))
+                    time_series_result = {
+                        "target_column": target_col,
+                        "datetime_column": dt_col,
+                        "trend": decomposition.trend.dropna().tolist()[:100],
+                        "seasonal": decomposition.seasonal.dropna().tolist()[:100],
+                        "residual": decomposition.resid.dropna().tolist()[:100],
+                        "original": ts_data[target_col].tolist()[:100]
+                    }
+                    print(f"[Time Series] Generated analysis for {target_col}")
+        except Exception as e:
+            print(f"[Time Series] Failed: {e}")
+            time_series_result = None
+
+    # Anomaly Detection
+    anomaly_result = None
+    if num_df.shape[1] >= 1 and num_df.dropna().shape[0] >= 50:
+        try:
+            from sklearn.ensemble import IsolationForest
+            
+            num_clean = num_df.dropna()
+            if len(num_clean) > 0:
+                iso_forest = IsolationForest(contamination=0.1, random_state=42)
+                outliers = iso_forest.fit_predict(num_clean)
+                scores = iso_forest.score_samples(num_clean)
+                
+                anomaly_result = {
+                    "method": "isolation_forest",
+                    "outliers_count": int(sum(outliers == -1)),
+                    "outlier_percentage": float(sum(outliers == -1) / len(outliers) * 100),
+                    "anomaly_scores": [float(s) for s in scores[:100]],
+                    "outlier_indices": [int(i) for i, x in enumerate(outliers) if x == -1][:50]
+                }
+                print(f"[Anomaly] Detected {anomaly_result['outliers_count']} outliers")
+        except Exception as e:
+            print(f"[Anomaly] Failed: {e}")
+            anomaly_result = None
+
+    # Clustering Analysis (Enhanced)
+    clustering_analysis = None
+    if num_df.shape[1] >= 2 and num_df.dropna().shape[0] >= 30:
+        try:
+            from sklearn.cluster import DBSCAN
+            from sklearn.preprocessing import StandardScaler
+            
+            num_clean = num_df.dropna()
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(num_clean)
+            
+            # DBSCAN
+            dbscan = DBSCAN(eps=0.5, min_samples=5)
+            dbscan_labels = dbscan.fit_predict(X_scaled)
+            
+            clustering_analysis = {
+                "dbscan": {
+                    "n_clusters": len(set(dbscan_labels)) - (1 if -1 in dbscan_labels else 0),
+                    "n_noise": int(sum(dbscan_labels == -1)),
+                    "labels": dbscan_labels[:300].tolist(),
+                    "silhouette_samples": []
+                }
+            }
+            
+            # Add 2D projection for visualization
+            if num_clean.shape[1] >= 2:
+                from sklearn.decomposition import PCA
+                pca_viz = PCA(n_components=2, random_state=42)
+                components_2d = pca_viz.fit_transform(X_scaled)
+                clustering_analysis["components_2d"] = components_2d[:300].tolist()
+                
+            print(f"[Clustering] DBSCAN found {clustering_analysis['dbscan']['n_clusters']} clusters")
+        except Exception as e:
+            print(f"[Clustering] Failed: {e}")
+            clustering_analysis = None
+
+    # Dimensionality Reduction (Enhanced)
+    dim_reduction = None
+    if num_df.shape[1] >= 3 and num_df.dropna().shape[0] >= 50:
+        try:
+            from sklearn.manifold import TSNE
+            from sklearn.decomposition import FastICA
+            from sklearn.preprocessing import StandardScaler
+            
+            num_clean = num_df.dropna()
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(num_clean)
+            
+            results = {}
+            
+            # t-SNE (if reasonable size)
+            if len(num_clean) <= 1000:
+                tsne = TSNE(n_components=2, random_state=42, perplexity=min(30, len(num_clean)-1))
+                tsne_result = tsne.fit_transform(X_scaled)
+                results["tsne"] = tsne_result[:300].tolist()
+            
+            # ICA
+            if num_clean.shape[1] >= 2:
+                ica = FastICA(n_components=min(3, num_clean.shape[1]), random_state=42)
+                ica_result = ica.fit_transform(X_scaled)
+                results["ica"] = ica_result[:300, :2].tolist()
+            
+            dim_reduction = results
+            print(f"[Dimensionality] Generated {len(results)} reduction methods")
+        except Exception as e:
+            print(f"[Dimensionality] Failed: {e}")
+            dim_reduction = None
+
+    # Feature Importance (if we can identify a target)
+    feature_importance = None
+    if num_df.shape[1] >= 2 and num_df.dropna().shape[0] >= 50:
+        try:
+            from sklearn.ensemble import RandomForestRegressor
+            from sklearn.preprocessing import StandardScaler
+            
+            num_clean = num_df.dropna()
+            # Use last column as target, others as features
+            X = num_clean.iloc[:, :-1]
+            y = num_clean.iloc[:, -1]
+            
+            if len(X.columns) > 0:
+                rf = RandomForestRegressor(n_estimators=100, random_state=42)
+                rf.fit(X, y)
+                
+                feature_importance = {
+                    "target_column": y.name,
+                    "features": X.columns.tolist(),
+                    "importance_scores": rf.feature_importances_.tolist(),
+                    "feature_ranking": sorted(zip(X.columns, rf.feature_importances_), 
+                                            key=lambda x: x[1], reverse=True)[:10]
+                }
+                print(f"[Feature Importance] Analyzed {len(X.columns)} features")
+        except Exception as e:
+            print(f"[Feature Importance] Failed: {e}")
+            feature_importance = None
+
+    # Store all advanced analytics
+    advanced_analytics = {
+        "time_series": time_series_result,
+        "anomaly_detection": anomaly_result,
+        "clustering_analysis": clustering_analysis,
+        "dimensionality_reduction": dim_reduction,
+        "feature_importance": feature_importance
+    }
+
     # Recommended charts
     rec_charts = []
     if numeric_info:       rec_charts.append({"type": "histogram",            "reason": "Distribution"})
     if correlation_matrix: rec_charts.append({"type": "correlation_heatmap",  "reason": "Relationships"})
     if pca_result:         rec_charts.append({"type": "pca_scatter",          "reason": "Dimensionality reduction"})
     if kmeans_result:      rec_charts.append({"type": "cluster_scatter",      "reason": f"Clusters k={kmeans_result['k']}"})
+    if time_series_result: rec_charts.append({"type": "time_series",          "reason": "Time series decomposition"})
+    if anomaly_result:     rec_charts.append({"type": "anomaly_detection",    "reason": "Outlier analysis"})
+    if clustering_analysis:rec_charts.append({"type": "clustering_analysis",  "reason": "Advanced clustering"})
+    if dim_reduction:      rec_charts.append({"type": "dimensionality_reduction", "reason": "Dimensionality reduction"})
+    if feature_importance: rec_charts.append({"type": "feature_importance",   "reason": "Feature ranking"})
     if categorical_info:
         first = list(categorical_info.keys())[:2]
         for f in first:
@@ -1634,6 +1888,7 @@ def build_auto_bundle(filename):
         "pca": pca_result,
         "kmeans": kmeans_result,
         "assoc_rules": assoc_result,
+        "advanced_analytics": advanced_analytics,
         "recommended_charts": rec_charts
     }
 
@@ -1699,6 +1954,9 @@ def chart_description():
     
     description = ai_chart_description(chart_type, data_context)
     return ok(**description)
+
+# ---------- AUTO EXPLORE ----------
+def ai_narrative_from_bundle(bundle):
     if not GEMINI_MODEL:
         print("[AI] Gemini model not available")
         if not GOOGLE_API_KEY:
@@ -1732,6 +1990,9 @@ def chart_description():
         return {"error": error_msg, "overview": f"AI analysis encountered an error: {error_msg}"}
     
     try:
+        # Extract advanced analytics info
+        advanced = bundle.get("advanced_analytics", {})
+        
         brief = {
             "basic": bundle["profile"]["basic"],
             "numeric_cols": list(bundle.get("numeric", {}).keys())[:6],
@@ -1739,32 +2000,56 @@ def chart_description():
             "top_correlations": [{"a": a, "b": b, "corr": c} for a, b, c in bundle.get("top_correlations", [])[:10]],
             "pca_var": bundle.get("pca", {}).get("explained_variance") if bundle.get("pca") else None,
             "kmeans_k": bundle.get("kmeans", {}).get("k") if bundle.get("kmeans") else None,
-            "rules_count": len(bundle.get("assoc_rules") or []) if bundle.get("assoc_rules") else 0
+            "rules_count": len(bundle.get("assoc_rules") or []) if bundle.get("assoc_rules") else 0,
+            "time_series_available": bool(advanced.get("time_series")),
+            "anomalies_detected": advanced.get("anomaly_detection", {}).get("outliers_count", 0) if advanced.get("anomaly_detection") else 0,
+            "clustering_methods": len([k for k, v in advanced.get("clustering_analysis", {}).items() if v]) if advanced.get("clustering_analysis") else 0,
+            "dimensionality_methods": len(advanced.get("dimensionality_reduction", {})) if advanced.get("dimensionality_reduction") else 0,
+            "feature_importance_available": bool(advanced.get("feature_importance"))
         }
         
         prompt = f"""
-You are an expert data scientist. Analyze this dataset structural brief and provide insights:
+You are an expert data scientist. Analyze this comprehensive dataset analysis and provide insights:
 
 Dataset Info:
 {json.dumps(brief, indent=2)}
 
+This analysis includes:
+- Basic statistics and correlations
+- PCA dimensionality reduction
+- K-means clustering
+- Time series analysis (if available)
+- Anomaly detection results
+- Advanced clustering methods
+- Multiple dimensionality reduction techniques
+- Feature importance analysis
+
 Return a JSON response with the following structure (ensure valid JSON format):
 {{
-  "overview": "2-3 sentence summary of the dataset characteristics and main patterns",
+  "overview": "2-3 sentence summary of the dataset characteristics and main patterns from all analyses",
   "key_findings": [
     "Finding 1 about data patterns or distributions",
     "Finding 2 about correlations or relationships", 
     "Finding 3 about clusters or groups",
-    "Finding 4 about anomalies or outliers",
-    "Finding 5 about data quality or completeness"
+    "Finding 4 about anomalies or outliers detected",
+    "Finding 5 about advanced analytics insights",
+    "Finding 6 about feature importance or time series patterns"
   ],
   "correlations_comment": "Insight about the correlation patterns found" or null,
-  "clusters_comment": "Insight about the clustering results" or null,
+  "clusters_comment": "Insight about the clustering results from multiple methods" or null,
   "pca_comment": "Insight about the PCA dimensionality reduction" or null,
+  "time_series_comment": "Insight about time series patterns if available" or null,
+  "anomaly_comment": "Insight about outliers and anomalies detected" or null,
+  "feature_importance_comment": "Insight about feature rankings if available" or null,
   "categorical_insights": [
     "Insight 1 about categorical data patterns",
     "Insight 2 about distributions",
     "Insight 3 about potential issues"
+  ],
+  "advanced_insights": [
+    "Insight 1 about advanced clustering patterns",
+    "Insight 2 about dimensionality reduction results",
+    "Insight 3 about predictive modeling potential"
   ],
   "potential_issues": [
     "Issue 1 - data quality concern",
@@ -1777,7 +2062,7 @@ Return a JSON response with the following structure (ensure valid JSON format):
   ],
   "chart_priorities": [
     "Most important visualization type",
-    "Second priority chart type",
+    "Second priority chart type", 
     "Third priority chart type"
   ]
 }}
@@ -1868,8 +2153,13 @@ def auto_explore():
         ai = ai_narrative_from_bundle(bundle)
         print(f"[Auto Explore] AI result type: {type(ai)}, keys: {list(ai.keys()) if isinstance(ai, dict) else 'N/A'}")
 
-        # 3) return slimmed version to client
-        return ok(bundle=slim_bundle(bundle), ai=ai)
+        # 3) generate chart descriptions for all available analyses
+        print(f"[Auto Explore] Generating chart descriptions...")
+        chart_descriptions = generate_chart_descriptions(bundle)
+        print(f"[Auto Explore] Generated {len(chart_descriptions)} chart descriptions")
+
+        # 4) return slimmed version to client with AI descriptions
+        return ok(bundle=slim_bundle(bundle), ai=ai, chart_descriptions=chart_descriptions)
 
     except Exception as e:
         app.logger.exception("auto_explore failed")

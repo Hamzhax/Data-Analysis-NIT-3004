@@ -38,6 +38,16 @@ window.renderValueCounts = renderValueCounts;
 window.renderCorrTable = renderCorrTable;
 window.renderAssoc = typeof renderAssoc !== 'undefined' ? renderAssoc : function(){};
 window.renderSummary = typeof renderSummary !== 'undefined' ? renderSummary : function(){};
+window.renderRegression = typeof renderRegression !== 'undefined' ? renderRegression : function(){};
+window.renderOutliers = typeof renderOutliers !== 'undefined' ? renderOutliers : function(){};
+window.renderFeatureImportance = typeof renderFeatureImportance !== 'undefined' ? renderFeatureImportance : function(){};
+window.renderTrends = typeof renderTrends !== 'undefined' ? renderTrends : function(){};
+window.renderTimeSeries = typeof renderTimeSeries !== 'undefined' ? renderTimeSeries : function(){};
+window.renderClusteringAnalysis = typeof renderClusteringAnalysis !== 'undefined' ? renderClusteringAnalysis : function(){};
+window.renderAnomalyDetection = typeof renderAnomalyDetection !== 'undefined' ? renderAnomalyDetection : function(){};
+window.renderDimensionalityReduction = typeof renderDimensionalityReduction !== 'undefined' ? renderDimensionalityReduction : function(){};
+window.renderModelComparison = typeof renderModelComparison !== 'undefined' ? renderModelComparison : function(){};
+window.showDimTab = typeof showDimTab !== 'undefined' ? showDimTab : function(){};
 window.ensureCorrelation = ensureCorrelation;
 window.generateAISummary = generateAISummary;
 window.clearAnalysis = clearAnalysis;
@@ -625,7 +635,19 @@ async function autoExplore(){
     }
     inferColumnTypes();
     if(document.body.getAttribute("data-page")==="visualization"){
-      ensureCorrelation(); renderOverview(); renderAINarrative(); syncExportButtons();
+      // Render all available analyses with AI descriptions
+      ensureCorrelation(); 
+      renderOverview(); 
+      renderAINarrative(); 
+      
+      // Render new advanced analytics if available
+      renderTimeSeries();
+      renderClusteringAnalysis();
+      renderAnomalyDetection();
+      renderDimensionalityReduction();
+      renderFeatureImportance();
+      
+      syncExportButtons();
     }
   }catch(e){
     console.error("[Auto Explore] Error:", e);
@@ -636,7 +658,7 @@ async function autoExplore(){
   }
 }
 function storeAutoBundle(result){
-  const b=result.bundle, ai=result.ai;
+  const b=result.bundle, ai=result.ai, chartDescriptions=result.chart_descriptions;
   lsSet("autoBundle",b);
   
   console.log("Storing auto bundle:", b); // Debug log
@@ -679,6 +701,42 @@ function storeAutoBundle(result){
   }
   
   if(b?.assoc_rules) lsSet("assoc",b.assoc_rules);
+  
+  // Store advanced analytics data
+  if(b?.advanced_analytics) {
+    console.log("Storing advanced analytics:", b.advanced_analytics);
+    
+    // Store time series data
+    if(b.advanced_analytics.time_series) {
+      lsSet("timeSeriesDecomp", b.advanced_analytics.time_series);
+    }
+    
+    // Store anomaly detection data
+    if(b.advanced_analytics.anomaly_detection) {
+      lsSet("anomalyDetection", b.advanced_analytics.anomaly_detection);
+    }
+    
+    // Store clustering analysis data
+    if(b.advanced_analytics.clustering_analysis) {
+      lsSet("clusteringAnalysis", b.advanced_analytics.clustering_analysis);
+    }
+    
+    // Store dimensionality reduction data
+    if(b.advanced_analytics.dimensionality_reduction) {
+      lsSet("dimensionalityReduction", b.advanced_analytics.dimensionality_reduction);
+    }
+    
+    // Store feature importance data
+    if(b.advanced_analytics.feature_importance) {
+      lsSet("featureImportance", b.advanced_analytics.feature_importance);
+    }
+  }
+  
+  // Store chart descriptions for AI integration
+  if(chartDescriptions) {
+    console.log("Storing chart descriptions:", chartDescriptions);
+    lsSet("chartDescriptions", chartDescriptions);
+  }
   
   // Store AI data with better error handling
   if(ai) {
@@ -1372,6 +1430,9 @@ function renderFeatureImportance() {
   
   html += "</tbody></table>";
   box.innerHTML = html;
+  
+  // Add AI description
+  setTimeout(() => addChartDescription("features-box", "feature_importance", features), 100);
 }
 
 function renderTrends() {
@@ -1404,6 +1465,321 @@ function renderTrends() {
   html += "</tbody></table>";
   box.innerHTML = html;
 }
+
+/* ---------- Time Series Decomposition ---------- */
+function renderTimeSeries() {
+  const data = lsGet("timeSeriesDecomp");
+  const box = $("timeseries-box");
+  if (!box) return;
+  
+  if (!data) {
+    box.innerHTML = "<p class='text-small text-dim'>No time series decomposition data. Run Time Series Decomposition analysis first.</p>";
+    return;
+  }
+  
+  const { target, date_column, trend, seasonal, residual, dates } = data;
+  
+  box.innerHTML = `
+    <h4>Time Series Decomposition: ${target}</h4>
+    <canvas id="timeseries-canvas" style="width:100%;height:400px;"></canvas>
+  `;
+  
+  const ctx = $("timeseries-canvas").getContext("2d");
+  
+  if (VizCharts.timeseries) VizCharts.timeseries.destroy();
+  VizCharts.timeseries = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: dates,
+      datasets: [
+        {
+          label: 'Trend',
+          data: trend,
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          fill: false
+        },
+        {
+          label: 'Seasonal',
+          data: seasonal,
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16, 185, 129, 0.1)',
+          fill: false
+        },
+        {
+          label: 'Residual',
+          data: residual,
+          borderColor: '#f59e0b',
+          backgroundColor: 'rgba(245, 158, 11, 0.1)',
+          fill: false
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: { display: true, text: `Time Series Components` },
+        legend: { display: true, position: 'top' }
+      },
+      scales: {
+        x: { title: { display: true, text: date_column } },
+        y: { title: { display: true, text: target } }
+      }
+    }
+  });
+  
+  // Add AI description
+  setTimeout(() => addChartDescription("timeseries-box", "line_chart", data), 100);
+}
+
+/* ---------- Advanced Clustering ---------- */
+function renderClusteringAnalysis() {
+  const data = lsGet("clusteringAnalysis");
+  const box = $("clustering-box");
+  if (!box) return;
+  
+  if (!data) {
+    box.innerHTML = "<p class='text-small text-dim'>No clustering analysis data. Run Advanced Clustering Suite first.</p>";
+    return;
+  }
+  
+  const { results, columns } = data;
+  
+  let html = `<h4>Advanced Clustering Analysis</h4>`;
+  
+  // K-means results
+  if (results.kmeans) {
+    html += `<h5>K-Means Analysis</h5>
+    <table class='data-table'>
+      <thead><tr><th>K</th><th>Silhouette Score</th><th>Inertia</th></tr></thead>
+      <tbody>`;
+    
+    results.kmeans.forEach(result => {
+      html += `<tr>
+        <td>${result.k}</td>
+        <td>${result.silhouette.toFixed(4)}</td>
+        <td>${result.inertia.toFixed(2)}</td>
+      </tr>`;
+    });
+    html += "</tbody></table>";
+  }
+  
+  // DBSCAN and Hierarchical results
+  if (results.dbscan) {
+    html += `<h5>DBSCAN Clustering</h5>`;
+    if (results.dbscan.error) {
+      html += `<p class='text-small text-dim'>Error: ${results.dbscan.error}</p>`;
+    } else {
+      html += `<p>Clusters: ${results.dbscan.clusters}, Silhouette: ${results.dbscan.silhouette.toFixed(4)}</p>`;
+    }
+  }
+  
+  if (results.hierarchical) {
+    html += `<h5>Hierarchical Clustering</h5>`;
+    if (results.hierarchical.error) {
+      html += `<p class='text-small text-dim'>Error: ${results.hierarchical.error}</p>`;
+    } else {
+      html += `<p>Clusters: ${results.hierarchical.clusters}, Silhouette: ${results.hierarchical.silhouette.toFixed(4)}</p>`;
+    }
+  }
+  
+  box.innerHTML = html;
+  
+  // Add AI description
+  setTimeout(() => addChartDescription("clustering-box", "clustering_analysis", data), 100);
+}
+
+/* ---------- Anomaly Detection ---------- */
+function renderAnomalyDetection() {
+  const data = lsGet("anomalyDetection");
+  const box = $("anomaly-box");
+  if (!box) return;
+  
+  if (!data) {
+    box.innerHTML = "<p class='text-small text-dim'>No anomaly detection data. Run Multi-Algorithm Anomaly Detection first.</p>";
+    return;
+  }
+  
+  const { results, total_points } = data;
+  
+  let html = `<h4>Anomaly Detection Results</h4>
+  <p class='text-small'>Total data points analyzed: ${total_points}</p>`;
+  
+  // Isolation Forest
+  if (results.isolation_forest) {
+    html += `<h5>🌲 Isolation Forest</h5>
+    <p>Outliers detected: ${results.isolation_forest.outliers} (${results.isolation_forest.outlier_percentage.toFixed(2)}%)</p>`;
+  }
+  
+  // One-Class SVM
+  if (results.one_class_svm) {
+    html += `<h5>🎯 One-Class SVM</h5>`;
+    if (results.one_class_svm.error) {
+      html += `<p class='text-small text-dim'>Error: ${results.one_class_svm.error}</p>`;
+    } else {
+      html += `<p>Outliers detected: ${results.one_class_svm.outliers} (${results.one_class_svm.outlier_percentage.toFixed(2)}%)</p>`;
+    }
+  }
+  
+  // Elliptic Envelope
+  if (results.elliptic_envelope) {
+    html += `<h5>📐 Elliptic Envelope</h5>`;
+    if (results.elliptic_envelope.error) {
+      html += `<p class='text-small text-dim'>Error: ${results.elliptic_envelope.error}</p>`;
+    } else {
+      html += `<p>Outliers detected: ${results.elliptic_envelope.outliers} (${results.elliptic_envelope.outlier_percentage.toFixed(2)}%)</p>`;
+    }
+  }
+  
+  box.innerHTML = html;
+  
+  // Add AI description
+  setTimeout(() => addChartDescription("anomaly-box", "anomaly_detection", data), 100);
+}
+
+/* ---------- Dimensionality Reduction ---------- */
+function renderDimensionalityReduction() {
+  const data = lsGet("dimensionalityReduction");
+  const box = $("dimreduction-box");
+  if (!box) return;
+  
+  if (!data) {
+    box.innerHTML = "<p class='text-small text-dim'>No dimensionality reduction data. Run Dimensionality Reduction Suite first.</p>";
+    return;
+  }
+  
+  const { results, original_features } = data;
+  
+  box.innerHTML = `
+    <h4>Dimensionality Reduction Suite</h4>
+    <p class='text-small'>Original features: ${original_features.length}</p>
+    <div id="dimreduction-tabs">
+      <button onclick="showDimTab('pca')" class="btn-small">PCA</button>
+      <button onclick="showDimTab('tsne')" class="btn-small">t-SNE</button>
+      <button onclick="showDimTab('ica')" class="btn-small">ICA</button>
+    </div>
+    <div id="dimreduction-content">
+      <canvas id="dimreduction-canvas" style="width:100%;height:350px;"></canvas>
+    </div>
+  `;
+  
+  // Store data globally for tab switching
+  window.dimReductionData = results;
+  showDimTab('pca'); // Show PCA by default
+  
+  // Add AI description
+  setTimeout(() => addChartDescription("dimreduction-box", "dimensionality_reduction", data), 100);
+}
+
+function showDimTab(method) {
+  const results = window.dimReductionData;
+  if (!results || !results[method]) return;
+  
+  const canvas = $("dimreduction-canvas");
+  const ctx = canvas.getContext("2d");
+  
+  if (VizCharts.dimreduction) VizCharts.dimreduction.destroy();
+  
+  if (results[method].error) {
+    $("dimreduction-content").innerHTML = `<p class='text-small text-dim'>Error: ${results[method].error}</p>`;
+    return;
+  }
+  
+  const points = results[method].components_2d.map(p => ({ x: p[0], y: p[1] }));
+  
+  VizCharts.dimreduction = new Chart(ctx, {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: method.toUpperCase(),
+        data: points,
+        backgroundColor: '#3b82f6',
+        borderColor: '#1d4ed8'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: { display: true, text: `${method.toUpperCase()} Dimensionality Reduction` },
+        legend: { display: false }
+      },
+      scales: {
+        x: { title: { display: true, text: 'Component 1' } },
+        y: { title: { display: true, text: 'Component 2' } }
+      }
+    }
+  });
+}
+
+/* ---------- Model Comparison ---------- */
+function renderModelComparison() {
+  const regressionData = lsGet("regressionComparison");
+  const classificationData = lsGet("classificationComparison");
+  const box = $("comparison-box");
+  if (!box) return;
+  
+  if (!regressionData && !classificationData) {
+    box.innerHTML = "<p class='text-small text-dim'>No model comparison data. Run Regression or Classification Model Comparison first.</p>";
+    return;
+  }
+  
+  let html = `<h4>Model Comparison Results</h4>`;
+  
+  // Regression comparison
+  if (regressionData) {
+    html += `<h5>📈 Regression Models (Target: ${regressionData.target})</h5>
+    <table class='data-table'>
+      <thead><tr><th>Model</th><th>R² Score</th><th>MSE</th><th>CV Mean</th><th>CV Std</th></tr></thead>
+      <tbody>`;
+    
+    regressionData.model_comparison.forEach(model => {
+      if (model.error) {
+        html += `<tr><td>${model.model}</td><td colspan="4" class="text-dim">Error: ${model.error}</td></tr>`;
+      } else {
+        html += `<tr>
+          <td>${model.model}</td>
+          <td>${model.r2_score.toFixed(4)}</td>
+          <td>${model.mse.toFixed(4)}</td>
+          <td>${model.cv_mean.toFixed(4)}</td>
+          <td>${model.cv_std.toFixed(4)}</td>
+        </tr>`;
+      }
+    });
+    html += "</tbody></table>";
+  }
+  
+  // Classification comparison
+  if (classificationData) {
+    html += `<h5>🏷️ Classification Models (Target: ${classificationData.target})</h5>
+    <table class='data-table'>
+      <thead><tr><th>Model</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1 Score</th></tr></thead>
+      <tbody>`;
+    
+    classificationData.model_comparison.forEach(model => {
+      if (model.error) {
+        html += `<tr><td>${model.model}</td><td colspan="4" class="text-dim">Error: ${model.error}</td></tr>`;
+      } else {
+        html += `<tr>
+          <td>${model.model}</td>
+          <td>${model.accuracy.toFixed(4)}</td>
+          <td>${model.precision.toFixed(4)}</td>
+          <td>${model.recall.toFixed(4)}</td>
+          <td>${model.f1_score.toFixed(4)}</td>
+        </tr>`;
+      }
+    });
+    html += "</tbody></table>";
+    
+    if (classificationData.class_labels) {
+      html += `<p class='text-small text-dim'>Classes: ${classificationData.class_labels.join(", ")}</p>`;
+    }
+  }
+  
+  box.innerHTML = html;
+}
+
 function renderAINarrative(){
   const box = $("ai-narrative-box") || $("ai-latest");
   if(!box) {
@@ -1733,6 +2109,15 @@ document.addEventListener("DOMContentLoaded", async ()=>{
       if(tab==="summary")      renderSummary();
       if(tab==="ai")           renderAINarrative();
       if(tab==="overview")     renderOverview();
+      if(tab==="regression")   renderRegression();
+      if(tab==="outliers")     renderOutliers();
+      if(tab==="features")     renderFeatureImportance();
+      if(tab==="trends")       renderTrends();
+      if(tab==="timeseries")   renderTimeSeries();
+      if(tab==="clustering")   renderClusteringAnalysis();
+      if(tab==="anomaly")      renderAnomalyDetection();
+      if(tab==="dimreduction") renderDimensionalityReduction();
+      if(tab==="comparison")   renderModelComparison();
     });
   }
 
@@ -1768,6 +2153,16 @@ window.renderAssoc=renderAssoc;
 window.renderSummary=renderSummary;
 window.renderAINarrative=renderAINarrative;
 window.renderOverview=renderOverview;
+window.renderRegression=renderRegression;
+window.renderOutliers=renderOutliers;
+window.renderFeatureImportance=renderFeatureImportance;
+window.renderTrends=renderTrends;
+window.renderTimeSeries=renderTimeSeries;
+window.renderClusteringAnalysis=renderClusteringAnalysis;
+window.renderAnomalyDetection=renderAnomalyDetection;
+window.renderDimensionalityReduction=renderDimensionalityReduction;
+window.renderModelComparison=renderModelComparison;
+window.showDimTab=showDimTab;
 window.downloadCorrelationCSV=downloadCorrelationCSV;
 window.downloadCorrelationPNG=downloadCorrelationPNG;
 window.clearAnalysis=clearAnalysis;
