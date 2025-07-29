@@ -718,6 +718,48 @@ function syncExportButtons(){
   t("btn-corr-export-csv-2",hasCorr); t("btn-corr-export-png-2",hasCorr);
   t("btn-export-rules",!!(assoc&&assoc.length));
 }
+
+/* ---------- AI Chart Descriptions ---------- */
+async function addChartDescription(containerId, chartType, fallbackText) {
+  const container = $(containerId);
+  if (!container) return;
+  
+  // Remove existing description
+  const existingDesc = container.querySelector('.ai-chart-description');
+  if (existingDesc) existingDesc.remove();
+  
+  // Create description element
+  const descDiv = document.createElement('div');
+  descDiv.className = 'ai-chart-description';
+  descDiv.style.cssText = 'margin-top:0.8rem;padding:0.6rem;background:#0a1520;border:1px solid #1a2f42;border-radius:6px;font-size:0.6rem;color:#a5b8c9;line-height:1.4;';
+  descDiv.innerHTML = `<div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.4rem;"><span style="color:#6ea8fe;">🤖</span><strong style="color:#d1e7dd;">AI Insight</strong></div><div class="ai-desc-content">${fallbackText}</div>`;
+  
+  // Try to get AI description
+  try {
+    const response = await fetch(BASE_URL + '/api/ai_chart_description', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ chart_type: chartType, context: fallbackText })
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success && data.description) {
+        const contentDiv = descDiv.querySelector('.ai-desc-content');
+        if (contentDiv) {
+          contentDiv.textContent = data.description;
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to get AI description:', error);
+    // Keep fallback text
+  }
+  
+  // Append to container
+  container.appendChild(descDiv);
+}
 function clearAnalysis(){
   LS_KEYS_TO_CLEAR.forEach(lsDel);
   toast("Analysis cache cleared","success");

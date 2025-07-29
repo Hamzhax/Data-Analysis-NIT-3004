@@ -730,6 +730,7 @@ def analyze():
         if method == "pca":
             num = df.select_dtypes(include="number").dropna()
             if num.shape[1] < 2: return fail("Need >=2 numeric columns.")
+            from sklearn.decomposition import PCA
             pca = PCA(n_components=min(3, num.shape[1]), random_state=42)
             comps = pca.fit_transform(num)
             return ok(method=method,
@@ -819,6 +820,64 @@ If information insufficient, still produce generic safe suggestions.
         return ok(**parsed)
     except Exception as e:
         return fail(f"AI summary failed: {e}", 500)
+
+@app.post("/api/ai_chart_description")
+def ai_chart_description():
+    ok_login, resp = require_login()
+    if not ok_login: return resp
+    if not GEMINI_MODEL:
+        return fail("AI not configured.", 500)
+    
+    d = request.get_json(force=True) or {}
+    chart_type = (d.get("chart_type") or "").strip()
+    context = (d.get("context") or "").strip()
+    
+    if not chart_type:
+        return fail("chart_type required.")
+    
+    # Create tailored prompts for different chart types
+    prompts = {
+        "pca": "Explain PCA (Principal Component Analysis) in 1-2 sentences focusing on dimensionality reduction and variance explanation.",
+        "kmeans": "Explain K-means clustering in 1-2 sentences focusing on grouping similar data points.",
+        "correlation": "Explain correlation analysis in 1-2 sentences focusing on relationships between variables.",
+        "value_counts": "Explain value counts analysis in 1-2 sentences focusing on frequency distribution of categories.",
+        "assoc": "Explain association rules in 1-2 sentences focusing on relationships between categorical variables.",
+        "summary": "Explain summary statistics in 1-2 sentences focusing on descriptive metrics and data overview."
+    }
+    
+    base_prompt = prompts.get(chart_type, f"Explain {chart_type} analysis in 1-2 sentences.")
+    prompt = f"{base_prompt} Context: {context}. Keep it simple and practical."
+    
+    try:
+        resp_ai = GEMINI_MODEL.generate_content(prompt)
+        description = (getattr(resp_ai, "text", None) or "").strip()
+        
+        # Fallback if AI fails
+        if not description:
+            fallbacks = {
+                "pca": "PCA reduces data dimensions while preserving important patterns, helping visualize complex datasets in 2D space.",
+                "kmeans": "K-means groups similar data points into clusters, revealing natural patterns and segments in your data.",
+                "correlation": "Correlation analysis shows how variables relate to each other, with values closer to 1 or -1 indicating stronger relationships.",
+                "value_counts": "Value counts show the frequency of different categories, helping identify the most and least common values.",
+                "assoc": "Association rules discover relationships between categorical variables, showing which items frequently appear together.",
+                "summary": "Summary statistics provide key metrics like mean, median, and standard deviation to understand data distribution."
+            }
+            description = fallbacks.get(chart_type, "This analysis provides insights into your data patterns and relationships.")
+        
+        return ok(description=description)
+    except Exception as e:
+        app.logger.exception("AI chart description failed")
+        # Return fallback on error
+        fallbacks = {
+            "pca": "PCA reduces data dimensions while preserving important patterns, helping visualize complex datasets in 2D space.",
+            "kmeans": "K-means groups similar data points into clusters, revealing natural patterns and segments in your data.",
+            "correlation": "Correlation analysis shows how variables relate to each other, with values closer to 1 or -1 indicating stronger relationships.",
+            "value_counts": "Value counts show the frequency of different categories, helping identify the most and least common values.",
+            "assoc": "Association rules discover relationships between categorical variables, showing which items frequently appear together.",
+            "summary": "Summary statistics provide key metrics like mean, median, and standard deviation to understand data distribution."
+        }
+        description = fallbacks.get(chart_type, "This analysis provides insights into your data patterns and relationships.")
+        return ok(description=description)
 
 # ---------- AUTO EXPLORE ----------
 def build_auto_bundle(filename):
