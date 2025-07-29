@@ -118,29 +118,14 @@
         <select id="analysis-method" class="input">
           <option value="summary">📊 Summary Statistics</option>
           <option value="correlation">🔗 Correlation Matrix</option>
-          <option value="value_counts">📋 Value Counts (requires column name)</option>
-          <option value="pca">🎯 Principal Component Analysis (PCA)</option>
-          <option value="kmeans">🔵 K-Means Clustering</option>
-          <option value="assoc_rules">🔗 Association Rules Mining</option>
-          <option value="linear_regression">📈 Linear Regression (requires target column)</option>
-          <option value="logistic_regression">🎯 Logistic Regression (requires target column)</option>
-          <option value="random_forest">🌲 Random Forest (requires target column)</option>
-          <option value="outlier_detection">⚠️ Outlier Detection</option>
-          <option value="feature_importance">🏆 Feature Importance (requires target column)</option>
-          <option value="trend_analysis">📈 Trend Analysis</option>
-          <option value="time_series_decomp">⏰ Time Series Decomposition (requires target column)</option>
-          <option value="clustering_analysis">🔄 Advanced Clustering Suite</option>
-          <option value="anomaly_detection">🚨 Multi-Algorithm Anomaly Detection</option>
-          <option value="dimensionality_reduction">📐 Dimensionality Reduction Suite</option>
-          <option value="regression_comparison">📊 Regression Model Comparison (requires target column)</option>
-          <option value="classification_comparison">🏷️ Classification Model Comparison (requires target column)</option>
+          <option value="value_counts">🎯 Value Counts (needs target column)</option>
+          <option value="pca">📉 PCA (Principal Component Analysis)</option>
+          <option value="kmeans">🔄 K-Means Clustering</option>
+          <option value="assoc_rules">🔗 Association Rules (needs categorical data)</option>
         </select>
 
         <label for="column-name" style="margin-top:.6rem;">Column (for Value Counts)</label>
         <input id="column-name" class="input" placeholder="column name">
-
-        <label for="target-column" style="margin-top:.6rem;">Target Column (for Regression/Feature Analysis)</label>
-        <input id="target-column" class="input" placeholder="target column name">
 
         <label for="cluster-k" style="margin-top:.6rem;">k (for KMeans)</label>
         <input id="cluster-k" type="number" value="3" min="2" max="12" class="input">
