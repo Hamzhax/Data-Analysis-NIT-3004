@@ -924,7 +924,6 @@ function renderCorrTable(){
   syncExportButtons();
   
   // Add AI description for correlation matrix
-  setTimeout(() => addChartDescription("corr-wrap", "correlation", "Correlation matrix showing relationships between numeric variables"), 100);
 }
 
 /* Optional CANVAS heatmap */
@@ -1100,7 +1099,7 @@ function renderAssoc(){
   box.innerHTML=h;
   
   // Add AI description
-  setTimeout(() => addChartDescription("assoc-box", "assoc", "Association rules showing relationships between categorical variables"), 100);
+  
 }
 
 /* ---------- Summary ---------- */
@@ -1121,8 +1120,6 @@ function renderSummary(){
   });
   h+="</tbody></table>"; box.innerHTML=h;
   
-  // Add AI description
-  setTimeout(() => addChartDescription("summary-box", "summary", "Summary statistics showing descriptive metrics for all columns"), 100);
 }
 
 /* ---------- AI Narrative render ---------- */
