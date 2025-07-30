@@ -716,7 +716,11 @@ function syncExportButtons(){
 /* ---------- AI Chart Descriptions ---------- */
 async function addChartDescription(containerId, chartType, fallbackText) {
   const container = $(containerId);
-  if (!container) return;
+  if (!container) {
+    console.warn(`Container not found: ${containerId}`);
+    return;
+  }
+  console.log(`Adding AI description to ${containerId} for ${chartType}`);
   
   // Check if we already have a recent description to prevent duplicates
   const existingDesc = container.querySelector('.ai-chart-description');
@@ -733,7 +737,7 @@ async function addChartDescription(containerId, chartType, fallbackText) {
   const descDiv = document.createElement('div');
   descDiv.className = 'ai-chart-description';
   descDiv.dataset.timestamp = Date.now().toString();
-  descDiv.style.cssText = 'margin-top:0.8rem;padding:0.6rem;background:#0a1520;border:1px solid #1a2f42;border-radius:6px;font-size:0.6rem;color:#a5b8c9;line-height:1.4;';
+  descDiv.style.cssText = 'margin-top:0.8rem;padding:0.6rem;background:#0a1520;border:1px solid #1a2f42;border-radius:6px;font-size:0.6rem;color:#a5b8c9;line-height:1.4;position:relative;z-index:10;';
   descDiv.innerHTML = `<div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.4rem;"><span style="color:#6ea8fe;">🤖</span><strong style="color:#d1e7dd;">AI Insight</strong></div><div class="ai-desc-content">${fallbackText}</div>`;
   
   // Try to get AI description
@@ -761,6 +765,7 @@ async function addChartDescription(containerId, chartType, fallbackText) {
   
   // Append to container
   container.appendChild(descDiv);
+  console.log(`AI description added to ${containerId}:`, descDiv);
 }
 function clearAnalysis(){
   LS_KEYS_TO_CLEAR.forEach(lsDel);
@@ -817,7 +822,7 @@ function renderValueCounts(mode){
   syncExportButtons();
   
   // Add AI description for value counts
-  setTimeout(() => addChartDescription("vc-canvas", "value_counts", `Value counts distribution showing frequency of categories in ${data.title || 'selected column'}`), 100);
+  setTimeout(() => addChartDescription("vc-chart-box", "value_counts", `Value counts distribution showing frequency of categories in ${data.title || 'selected column'}`), 100);
 }
 
 /* ---------- Correlation MATRIX/TABLE ---------- */
@@ -924,6 +929,7 @@ function renderCorrTable(){
   syncExportButtons();
   
   // Add AI description for correlation matrix
+  setTimeout(() => addChartDescription("corr-wrap", "correlation", "Correlation matrix showing relationships between numeric variables"), 100);
 }
 
 /* Optional CANVAS heatmap */
@@ -1099,7 +1105,7 @@ function renderAssoc(){
   box.innerHTML=h;
   
   // Add AI description
-  
+  setTimeout(() => addChartDescription("assoc-box", "assoc", "Association rules showing relationships between categorical variables"), 100);
 }
 
 /* ---------- Summary ---------- */
@@ -1120,6 +1126,8 @@ function renderSummary(){
   });
   h+="</tbody></table>"; box.innerHTML=h;
   
+  // Add AI description
+  setTimeout(() => addChartDescription("summary-box", "summary", "Summary statistics showing descriptive metrics for all columns"), 100);
 }
 
 /* ---------- AI Narrative render ---------- */
@@ -1284,6 +1292,9 @@ function renderOverview(){
       <span class="badge-chip">${base.categorical_cols} categorical</span>
     </div>
     <p style="font-size:.63rem;margin:.4rem 0;"><strong>Recommended charts:</strong> ${rec||"—"}</p>`;
+  
+  // Add AI description for overview
+  setTimeout(() => addChartDescription("overview-meta", "overview", "Dataset overview showing basic statistics and data characteristics"), 100);
 }
 
 /* ---------- Column type ribbon ---------- */
