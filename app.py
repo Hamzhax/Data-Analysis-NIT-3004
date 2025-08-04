@@ -156,7 +156,7 @@ def slim_bundle(bundle):
         # del out["correlation_matrix"]
 
     # Association rules
-    if "assoc_rules" in out and len(out["assoc_rules"]) > 100:
+    if "assoc_rules" in out and out["assoc_rules"] is not None and len(out["assoc_rules"]) > 100:
         out["assoc_rules"] = out["assoc_rules"][:100]
     
     # K-means - keep all data, it's already limited to 300 points  
@@ -880,17 +880,31 @@ def build_auto_bundle(filename):
     summary = safe_describe(df)
 
     # Categorical info
-    categorical_info = {c: top_cats(cat_df[c], top=8) for c in cat_df.columns}
+    categorical_info = {}
+    try:
+        if not cat_df.empty:
+            categorical_info = {c: top_cats(cat_df[c], top=8) for c in cat_df.columns}
+    except Exception as e:
+        print(f"[Build Bundle] Error processing categorical data: {e}")
+        categorical_info = {}
     # Numeric info
     numeric_info = {}
-    for c in num_df.columns:
-        numeric_info[c] = {
-            "min":  float(num_df[c].min())  if not num_df[c].empty else None,
-            "max":  float(num_df[c].max())  if not num_df[c].empty else None,
-            "mean": float(num_df[c].mean()) if not num_df[c].empty else None,
-            "std":  float(num_df[c].std())  if not num_df[c].empty else None,
-            "hist": compress_hist(num_df[c])
-        }
+    try:
+        for c in num_df.columns:
+            try:
+                numeric_info[c] = {
+                    "min":  float(num_df[c].min())  if not num_df[c].empty and not num_df[c].isna().all() else None,
+                    "max":  float(num_df[c].max())  if not num_df[c].empty and not num_df[c].isna().all() else None,
+                    "mean": float(num_df[c].mean()) if not num_df[c].empty and not num_df[c].isna().all() else None,
+                    "std":  float(num_df[c].std())  if not num_df[c].empty and not num_df[c].isna().all() else None,
+                    "hist": compress_hist(num_df[c])
+                }
+            except Exception as col_error:
+                print(f"[Build Bundle] Error processing numeric column {c}: {col_error}")
+                numeric_info[c] = {"min": None, "max": None, "mean": None, "std": None, "hist": []}
+    except Exception as e:
+        print(f"[Build Bundle] Error processing numeric data: {e}")
+        numeric_info = {}
 
     # Correlation
     top_correlations = []
@@ -898,17 +912,23 @@ def build_auto_bundle(filename):
     truncated = False
     kept_cols = []
     original_side = None
-    if num_df.shape[1] >= 2:
-        corr_full = num_df.corr().fillna(0)
-        corr_small, truncated, kept_cols, original_side = maybe_truncate_correlation(corr_full)
-        correlation_matrix = corr_small.to_dict()
-        pairs = []
-        cols = corr_full.columns
-        for i in range(len(cols)):
-            for j in range(i + 1, len(cols)):
-                pairs.append((cols[i], cols[j], float(corr_full.iloc[i, j])))
-        pairs.sort(key=lambda x: abs(x[2]), reverse=True)
-        top_correlations = pairs[:15]
+    try:
+        if num_df.shape[1] >= 2:
+            corr_full = num_df.corr().fillna(0)
+            if corr_full is not None and not corr_full.empty:
+                corr_small, truncated, kept_cols, original_side = maybe_truncate_correlation(corr_full)
+                correlation_matrix = corr_small.to_dict()
+                pairs = []
+                cols = corr_full.columns
+                for i in range(len(cols)):
+                    for j in range(i + 1, len(cols)):
+                        pairs.append((cols[i], cols[j], float(corr_full.iloc[i, j])))
+                pairs.sort(key=lambda x: abs(x[2]), reverse=True)
+                top_correlations = pairs[:15]
+    except Exception as e:
+        print(f"[Build Bundle] Error processing correlation: {e}")
+        top_correlations = []
+        correlation_matrix = None
 
     # KMeans
     kmeans_result = None
@@ -934,26 +954,32 @@ def build_auto_bundle(filename):
                 # Get 2D components for visualization using PCA
                 components_2d = None
                 if nd.shape[1] >= 2:
-                    # Create 2D projection for visualization
-                    from sklearn.decomposition import PCA
-                    viz_pca = PCA(n_components=2, random_state=42)
-                    components_2d = viz_pca.fit_transform(nd).tolist()
-                    # Ensure we match the length of K-means labels
-                    min_len = min(len(components_2d), len(best_model.labels_))
-                    components_2d = components_2d[:min_len]
+                    try:
+                        # Create 2D projection for visualization
+                        from sklearn.decomposition import PCA
+                        viz_pca = PCA(n_components=2, random_state=42)
+                        components_2d = viz_pca.fit_transform(nd).tolist()
+                        # Ensure we have valid data and match the length of K-means labels
+                        if components_2d and len(components_2d) > 0 and best_model.labels_ is not None:
+                            min_len = min(len(components_2d), len(best_model.labels_))
+                            components_2d = components_2d[:min_len]
+                        else:
+                            components_2d = None
+                    except Exception:
+                        components_2d = None
                 
                 kmeans_result = {
                     "k": best_k,
                     "centers": best_model.cluster_centers_.tolist(),
-                    "labels_preview": best_model.labels_[:300].tolist(),
-                    "labels": best_model.labels_.tolist(),
+                    "labels_preview": best_model.labels_[:300].tolist() if best_model.labels_ is not None else [],
+                    "labels": best_model.labels_.tolist() if best_model.labels_ is not None else [],
                     "columns": nd.columns.tolist()
                 }
                 
                 # Add 2D components if available and ensure length consistency
-                if components_2d:
+                if components_2d is not None and len(components_2d) > 0 and best_model.labels_ is not None:
                     # Make sure components_2d matches the length of labels_preview
-                    max_len = min(len(components_2d), 300)
+                    max_len = min(len(components_2d), 300, len(best_model.labels_))
                     kmeans_result["components_2d"] = components_2d[:max_len]
                     # Also trim labels_preview to match
                     kmeans_result["labels_preview"] = best_model.labels_[:max_len].tolist()
