@@ -487,7 +487,9 @@ async function autoExplore(){
     }
     inferColumnTypes();
     if(document.body.getAttribute("data-page")==="visualization"){
-      ensureCorrelation(); renderOverview(); renderAINarrative(); syncExportButtons();
+      // Only trigger sync and refresh meta, let tab switching handle renders
+      syncExportButtons();
+      loadMeta();
     }
   }catch(e){
     console.error("[Auto Explore] Error:", e);
@@ -722,12 +724,16 @@ async function addChartDescription(containerId, chartType, fallbackText) {
   }
   console.log(`Adding AI description to ${containerId} for ${chartType}`);
   
-  // Check if we already have a recent description to prevent duplicates
+  // Check if we already have a description for this container and chart type to prevent duplicates
   const existingDesc = container.querySelector('.ai-chart-description');
   if (existingDesc) {
-    // If the description was added recently (within 2 seconds), don't add another
-    const timestamp = existingDesc.dataset.timestamp;
-    if (timestamp && (Date.now() - parseInt(timestamp)) < 2000) {
+    const existingChartType = existingDesc.dataset.chartType;
+    const existingTimestamp = existingDesc.dataset.timestamp;
+    
+    // If same chart type in same container, or added recently, don't add another
+    if (existingChartType === chartType || 
+        (existingTimestamp && (Date.now() - parseInt(existingTimestamp)) < 10000)) {
+      console.log(`Skipping duplicate AI description for ${containerId}/${chartType}`);
       return;
     }
     existingDesc.remove();
@@ -737,6 +743,7 @@ async function addChartDescription(containerId, chartType, fallbackText) {
   const descDiv = document.createElement('div');
   descDiv.className = 'ai-chart-description';
   descDiv.dataset.timestamp = Date.now().toString();
+  descDiv.dataset.chartType = chartType; // Store chart type for duplicate detection
   descDiv.style.cssText = 'margin-top:0.8rem;padding:0.6rem;background:#0a1520;border:1px solid #1a2f42;border-radius:6px;font-size:0.6rem;color:#a5b8c9;line-height:1.4;position:relative;z-index:10;';
   descDiv.innerHTML = `<div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.4rem;"><span style="color:#6ea8fe;">🤖</span><strong style="color:#d1e7dd;">AI Insight</strong></div><div class="ai-desc-content">${fallbackText}</div>`;
   
@@ -854,9 +861,17 @@ function renderCorrTable(){
   if(!wrap) return;
   const corr = getCorrelationMatrix();
   if(!corr){
-    wrap.innerHTML="<p class='text-small text-dim' style='padding:.5rem;'>No correlation available – run Correlation Matrix or Auto Explore.</p>";
+    const errorMsg = "<p class='text-small text-dim' style='padding:.5rem;'>No correlation available – run Correlation Matrix or Auto Explore.</p>";
+    if(wrap.innerHTML !== errorMsg) {
+      wrap.innerHTML = errorMsg;
+    }
     syncExportButtons(); return;
   }
+  
+  // Prevent duplicate renders by checking correlation data hash
+  const corrHash = JSON.stringify(corr);
+  if (wrap.dataset.lastCorrHash === corrHash) return;
+  
   const {cols,min,max} = buildCorrMeta(corr);
   const scaleSel = $("corr-scale"); let rng=1;
   if(scaleSel && scaleSel.value!=="auto") rng=parseFloat(scaleSel.value)||1;
@@ -926,6 +941,7 @@ function renderCorrTable(){
     setTimeout(()=>{ if(hint && hint.textContent.startsWith("Copied")) hint.textContent="Click a cell to copy pair + r"; },2200);
   });
 
+  wrap.dataset.lastCorrHash = corrHash;
   syncExportButtons();
   
   // Add AI description for correlation matrix
@@ -1088,7 +1104,16 @@ function renderKMeans(){
 function renderAssoc(){
   const assoc=lsGet("assoc")||lsGet("autoBundle")?.assoc_rules;
   const box=$("assoc-box")||$("assoc-container"); if(!box) return;
-  if(!assoc||!assoc.length){ box.innerHTML="<p class='text-small text-dim'>No rules.</p>"; return; }
+  
+  // Prevent duplicate renders
+  const assocHash = JSON.stringify(assoc || []);
+  if (box.dataset.lastAssocHash === assocHash) return;
+  
+  if(!assoc||!assoc.length){ 
+    box.innerHTML="<p class='text-small text-dim'>No rules.</p>"; 
+    box.dataset.lastAssocHash = assocHash;
+    return; 
+  }
   let h=`<table class='data-table'><thead><tr>
   <th>Antecedents</th><th>Consequents</th><th>Support</th><th>Confidence</th><th>Lift</th>
   </tr></thead><tbody>`;
@@ -1103,6 +1128,7 @@ function renderAssoc(){
   });
   h+="</tbody></table>";
   box.innerHTML=h;
+  box.dataset.lastAssocHash = assocHash;
   
   // Add AI description
   setTimeout(() => addChartDescription("assoc-box", "assoc", "Association rules showing relationships between categorical variables"), 100);
@@ -1112,7 +1138,16 @@ function renderAssoc(){
 function renderSummary(){
   const sum=lsGet("summary")||lsGet("autoBundle")?.summary;
   const box=$("summary-box")||$("summary-container"); if(!box) return;
-  if(!sum){ box.innerHTML="<p class='text-small text-dim'>No summary data.</p>"; return; }
+  
+  // Prevent duplicate renders
+  const summaryHash = JSON.stringify(sum || {});
+  if (box.dataset.lastSummaryHash === summaryHash) return;
+  
+  if(!sum){ 
+    box.innerHTML="<p class='text-small text-dim'>No summary data.</p>"; 
+    box.dataset.lastSummaryHash = summaryHash;
+    return; 
+  }
   const cols=Object.keys(sum); const stats=new Set(); cols.forEach(c=>Object.keys(sum[c]).forEach(k=>stats.add(k)));
   let h="<table class='data-table'><thead><tr><th>Metric</th>"+cols.map(c=>`<th>${c}</th>`).join("")+"</tr></thead><tbody>";
   [...stats].forEach(st=>{
@@ -1124,7 +1159,9 @@ function renderSummary(){
     });
     h+="</tr>";
   });
-  h+="</tbody></table>"; box.innerHTML=h;
+  h+="</tbody></table>"; 
+  box.innerHTML=h;
+  box.dataset.lastSummaryHash = summaryHash;
   
   // Add AI description
   setTimeout(() => addChartDescription("summary-box", "summary", "Summary statistics showing descriptive metrics for all columns"), 100);
@@ -1276,9 +1313,15 @@ function renderAINarrative(){
 function renderOverview(){
   const b=lsGet("autoBundle");
   const oc=$("overview-meta")||$("overview-container"); if(!oc) return;
+  
+  // Prevent duplicate renders by checking if content is the same
+  const currentDataHash = JSON.stringify(b?.profile?.basic || {}) + (b?.filename || '');
+  if (oc.dataset.lastRenderHash === currentDataHash) return;
+  
   if(!b){
     const fn=localStorage.getItem("filename")||"(none)";
     oc.innerHTML=`<p class='text-small text-dim'>No Auto Explore yet. Active file: <strong>${fn}</strong>.</p>`;
+    oc.dataset.lastRenderHash = fn;
     return;
   }
   const base=b.profile?.basic||{};
@@ -1292,6 +1335,8 @@ function renderOverview(){
       <span class="badge-chip">${base.categorical_cols} categorical</span>
     </div>
     <p style="font-size:.63rem;margin:.4rem 0;"><strong>Recommended charts:</strong> ${rec||"—"}</p>`;
+  
+  oc.dataset.lastRenderHash = currentDataHash;
   
   // Add AI description for overview
   setTimeout(() => addChartDescription("overview-meta", "overview", "Dataset overview showing basic statistics and data characteristics"), 100);
@@ -1473,8 +1518,12 @@ document.addEventListener("DOMContentLoaded", async ()=>{
 
   // Storage sync
   window.addEventListener("storage",ev=>{
-    if(["autoBundle","valueCounts","correlation","filename"].includes(ev.key)){
-      if(page==="visualization") initVisualizationPage();
+    if(["filename"].includes(ev.key)){
+      if(page==="visualization") {
+        loadMeta();
+        // Only re-render if we're on the overview tab
+        if(window.currentVizTab === "overview") renderOverview();
+      }
       if(page==="dashboard") previewDataset();
     }
   });
